@@ -13,6 +13,7 @@ import (
 	"trustbank/ledger/internal/config"
 	"trustbank/ledger/internal/dbctx"
 	"trustbank/ledger/internal/httpapi"
+	"trustbank/ledger/internal/outbox"
 )
 
 func main() {
@@ -29,6 +30,8 @@ func main() {
 		log.Fatalf("db: %v", err)
 	}
 	defer pool.Close()
+
+	go outbox.NewConsumer(pool).Run(ctx)
 
 	handler := httpapi.NewServer(pool, cfg.SharedSecret)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: handler}

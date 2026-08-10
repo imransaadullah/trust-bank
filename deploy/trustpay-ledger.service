@@ -1,0 +1,27 @@
+[Unit]
+Description=TrustPay Core Ledger Service
+Documentation=https://github.com/imransaadullah/trust-bank
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=exec
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu/apps/trustpay-ledger
+EnvironmentFile=-/home/ubuntu/apps/trustpay-ledger/.env
+
+ExecStart=/home/ubuntu/apps/trustpay-ledger/bin/ledger
+
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

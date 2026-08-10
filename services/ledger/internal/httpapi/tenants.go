@@ -14,6 +14,7 @@ type createTenantRequest struct {
 	LicenseType    string `json:"licenseType"`
 	DeploymentMode string `json:"deploymentMode"`
 	BaseCurrency   string `json:"baseCurrency"`
+	WebhookURL     string `json:"webhookUrl"`
 }
 
 func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
@@ -32,6 +33,7 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 		LicenseType:    domain.LicenseType(req.LicenseType),
 		DeploymentMode: domain.DeploymentMode(req.DeploymentMode),
 		BaseCurrency:   req.BaseCurrency,
+		WebhookURL:     req.WebhookURL,
 	})
 	if err != nil {
 		respondError(w, http.StatusUnprocessableEntity, err.Error())

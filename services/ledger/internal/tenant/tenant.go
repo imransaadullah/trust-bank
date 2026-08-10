@@ -5,6 +5,7 @@ package tenant
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -16,12 +17,23 @@ import (
 	"trustbank/ledger/internal/domain"
 )
 
+const (
+	FloatAccountNumber     = "SYS-FLOAT"
+	FeeIncomeAccountNumber = "SYS-FEE-INCOME"
+	CustomerDepositsGLCode = "2100"
+)
+
 type CreateInput struct {
 	Slug           string
 	Name           string
 	LicenseType    domain.LicenseType
 	DeploymentMode domain.DeploymentMode
 	BaseCurrency   string
+	// WebhookURL, if set, is where internal/outbox delivers this tenant's
+	// ledger events (journal entries posted, etc). Stored under
+	// settings.webhookUrl — nothing about the schema is specific to it,
+	// so other per-tenant config can land in the same JSON column later.
+	WebhookURL string
 }
 
 // SystemAccounts are the ledger accounts every fresh tenant gets so that
@@ -46,24 +58,33 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 		DeploymentMode: deploymentMode, BaseCurrency: baseCurrency,
 	}
 
+	settings := map[string]any{}
+	if in.WebhookURL != "" {
+		settings["webhookUrl"] = in.WebhookURL
+	}
+	settingsJSON, err := json.Marshal(settings)
+	if err != nil {
+		return nil, nil, fmt.Errorf("tenant: marshal settings: %w", err)
+	}
+
 	row := pool.QueryRow(ctx, `
-		INSERT INTO tenants (slug, name, license_type, deployment_mode, base_currency)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO tenants (slug, name, license_type, deployment_mode, base_currency, settings)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, created_at
-	`, in.Slug, in.Name, in.LicenseType, deploymentMode, baseCurrency)
+	`, in.Slug, in.Name, in.LicenseType, deploymentMode, baseCurrency, settingsJSON)
 	if err := row.Scan(&t.ID, &t.CreatedAt); err != nil {
 		return nil, nil, fmt.Errorf("tenant: create %s: %w", in.Slug, err)
 	}
 
 	var sysAccounts *SystemAccounts
-	err := dbctx.WithTenant(ctx, pool, t.ID, func(ctx context.Context, tx pgx.Tx) error {
+	err = dbctx.WithTenant(ctx, pool, t.ID, func(ctx context.Context, tx pgx.Tx) error {
 		chart, err := coa.SeedDefault(ctx, tx, t.ID)
 		if err != nil {
 			return err
 		}
 
 		floatAcc, err := account.Open(ctx, tx, account.OpenInput{
-			TenantID: t.ID, GLAccountID: chart["1100"].ID, AccountNumber: "SYS-FLOAT",
+			TenantID: t.ID, GLAccountID: chart["1100"].ID, AccountNumber: FloatAccountNumber,
 			ProductType: "float", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
 		})
 		if err != nil {
@@ -71,7 +92,7 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 		}
 
 		feeAcc, err := account.Open(ctx, tx, account.OpenInput{
-			TenantID: t.ID, GLAccountID: chart["4100"].ID, AccountNumber: "SYS-FEE-INCOME",
+			TenantID: t.ID, GLAccountID: chart["4100"].ID, AccountNumber: FeeIncomeAccountNumber,
 			ProductType: "fee_income", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
 		})
 		if err != nil {

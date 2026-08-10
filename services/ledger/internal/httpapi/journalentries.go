@@ -7,6 +7,7 @@ import (
 
 	"trustbank/ledger/internal/domain"
 	"trustbank/ledger/internal/ledger"
+	"trustbank/ledger/internal/wallet"
 )
 
 type lineRequest struct {
@@ -55,7 +56,7 @@ func (s *Server) handlePostJournalEntry(w http.ResponseWriter, r *http.Request) 
 		InitiatorID: req.InitiatorID, InitiatorType: req.InitiatorType, Metadata: req.Metadata, Lines: lines,
 	})
 	if err != nil {
-		respondLedgerError(w, err)
+		respondWalletError(w, err)
 		return
 	}
 
@@ -88,7 +89,7 @@ func (s *Server) handleReverseJournalEntry(w http.ResponseWriter, r *http.Reques
 		InitiatorID: req.InitiatorID, InitiatorType: req.InitiatorType, IdempotencyKey: req.IdempotencyKey,
 	})
 	if err != nil {
-		respondLedgerError(w, err)
+		respondWalletError(w, err)
 		return
 	}
 
@@ -109,8 +110,17 @@ func journalEntryResponse(entry *domain.JournalEntry) map[string]any {
 	}
 }
 
-func respondLedgerError(w http.ResponseWriter, err error) {
+// respondWalletError maps errors from both internal/wallet (product-level
+// operations) and internal/ledger (the primitive underneath them) to HTTP
+// status codes — a handler calling either package can use this directly.
+func respondWalletError(w http.ResponseWriter, err error) {
 	switch {
+	case errors.Is(err, wallet.ErrCustomerAlreadyHasAccount):
+		respondError(w, http.StatusConflict, err.Error())
+	case errors.Is(err, wallet.ErrCustomerAccountNotFound):
+		respondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, wallet.ErrSameAccount):
+		respondError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, ledger.ErrInsufficientBalance):
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ledger.ErrUnbalancedEntry), errors.Is(err, ledger.ErrTooFewLines), errors.Is(err, ledger.ErrNonPositiveAmount):

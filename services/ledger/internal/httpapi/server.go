@@ -23,6 +23,11 @@ func NewServer(pool *pgxpool.Pool, sharedSecret string) http.Handler {
 	mux.Handle("POST /v1/journal-entries", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handlePostJournalEntry))))
 	mux.Handle("POST /v1/journal-entries/{id}/reverse", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleReverseJournalEntry))))
 	mux.Handle("GET /v1/accounts/{id}/balance", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleGetBalance))))
+	mux.Handle("POST /v1/accounts", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleOpenAccount))))
+	mux.Handle("GET /v1/customers/{externalCustomerId}/account", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleGetAccountByCustomer))))
+	mux.Handle("POST /v1/transfers/p2p", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleP2PTransfer))))
+	mux.Handle("POST /v1/transfers/deposit/confirm", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleConfirmDeposit))))
+	mux.Handle("POST /v1/transfers/withdrawal", requireSecret(sharedSecret, requireTenant(http.HandlerFunc(s.handleRecordWithdrawal))))
 
 	return mux
 }
