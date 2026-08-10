@@ -1,0 +1,89 @@
+// Package tenant provisions institutions onto the platform: creating the
+// tenant row plus its default chart of accounts and system ledger
+// accounts, so a freshly onboarded tenant can post entries immediately.
+package tenant
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"trustbank/ledger/internal/account"
+	"trustbank/ledger/internal/coa"
+	"trustbank/ledger/internal/dbctx"
+	"trustbank/ledger/internal/domain"
+)
+
+type CreateInput struct {
+	Slug           string
+	Name           string
+	LicenseType    domain.LicenseType
+	DeploymentMode domain.DeploymentMode
+	BaseCurrency   string
+}
+
+// SystemAccounts are the ledger accounts every fresh tenant gets so that
+// fees and float have somewhere to post to from day one.
+type SystemAccounts struct {
+	Float     *domain.LedgerAccount
+	FeeIncome *domain.LedgerAccount
+}
+
+func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Tenant, *SystemAccounts, error) {
+	deploymentMode := in.DeploymentMode
+	if deploymentMode == "" {
+		deploymentMode = domain.Shared
+	}
+	baseCurrency := in.BaseCurrency
+	if baseCurrency == "" {
+		baseCurrency = "NGN"
+	}
+
+	t := &domain.Tenant{
+		Slug: in.Slug, Name: in.Name, LicenseType: in.LicenseType,
+		DeploymentMode: deploymentMode, BaseCurrency: baseCurrency,
+	}
+
+	row := pool.QueryRow(ctx, `
+		INSERT INTO tenants (slug, name, license_type, deployment_mode, base_currency)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, created_at
+	`, in.Slug, in.Name, in.LicenseType, deploymentMode, baseCurrency)
+	if err := row.Scan(&t.ID, &t.CreatedAt); err != nil {
+		return nil, nil, fmt.Errorf("tenant: create %s: %w", in.Slug, err)
+	}
+
+	var sysAccounts *SystemAccounts
+	err := dbctx.WithTenant(ctx, pool, t.ID, func(ctx context.Context, tx pgx.Tx) error {
+		chart, err := coa.SeedDefault(ctx, tx, t.ID)
+		if err != nil {
+			return err
+		}
+
+		floatAcc, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: t.ID, GLAccountID: chart["1100"].ID, AccountNumber: "SYS-FLOAT",
+			ProductType: "float", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		})
+		if err != nil {
+			return fmt.Errorf("tenant: open float account: %w", err)
+		}
+
+		feeAcc, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: t.ID, GLAccountID: chart["4100"].ID, AccountNumber: "SYS-FEE-INCOME",
+			ProductType: "fee_income", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		})
+		if err != nil {
+			return fmt.Errorf("tenant: open fee income account: %w", err)
+		}
+
+		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc}
+		return nil
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return t, sysAccounts, nil
+}

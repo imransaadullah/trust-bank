@@ -1,0 +1,3 @@
+services/ledger/bin/
+services/ledger/.env
+*.log
