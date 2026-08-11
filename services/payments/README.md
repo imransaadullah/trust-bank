@@ -15,6 +15,9 @@ credentials encrypted at rest (`src/crypto/tenantSecrets.js`, AES-256-GCM).
 
 **Real, and verified against a live Ledger + a real (though fake-keyed)
 Paystack HTTP round trip:**
+- Binds `127.0.0.1` by default (`BIND_HOST`), never `0.0.0.0` — this
+  service is never meant to be internet-facing in any deployment model.
+  See `../../deploy/NETWORK_TOPOLOGY.md`.
 - The provider contract, proven against two structurally different rails —
   Paystack (implemented) and a self-issued-NUBAN stub (interface only,
   every method rejects "not implemented" — see `src/providers/selfIssuedNuban.js`).

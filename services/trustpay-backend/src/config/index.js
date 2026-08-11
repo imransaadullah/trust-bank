@@ -11,6 +11,11 @@ function required(name) {
 module.exports = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '8082', 10),
+  // Loopback only by default, even though this is the public-facing
+  // service — a reverse proxy (see deploy/Caddyfile.example) terminates
+  // TLS and is the only process that binds a public interface. Override
+  // to a private/VPN interface IP only for a split hybrid deployment.
+  bindHost: process.env.BIND_HOST || '127.0.0.1',
   // The same tenant id everywhere — this backend is always exactly one
   // tenant, registered once on the Ledger (POST /v1/tenants) and
   // configured once on Payments (POST /v1/tenants/:id/config). Kept as a

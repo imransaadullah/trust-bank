@@ -14,6 +14,10 @@ money-adjacent goes through three other services:
 
 **Real, verified against live `services/ledger` and `services/payments`
 instances during development:**
+- Binds `127.0.0.1` by default (`BIND_HOST`), never `0.0.0.0` — even
+  though this is the public-facing service, a reverse proxy
+  (`../../deploy/Caddyfile.example`) is meant to be the only process that
+  binds a public interface. See `../../deploy/NETWORK_TOPOLOGY.md`.
 - Signup → Tier-0 wallet opened on the Ledger automatically
 - Balance reads, P2P transfer between two real users (both sides' local
   `Transaction` rows written, balances confirmed exact), transaction

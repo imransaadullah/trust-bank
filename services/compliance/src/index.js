@@ -4,8 +4,8 @@ const logger = require('./utils/logger');
 
 const app = createApp();
 
-const server = app.listen(config.port, () => {
-  logger.info(`Compliance service listening on :${config.port}`);
+const server = app.listen(config.port, config.bindHost, () => {
+  logger.info(`Compliance service listening on ${config.bindHost}:${config.port}`);
 });
 
 process.on('SIGTERM', () => {

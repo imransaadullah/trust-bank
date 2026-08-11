@@ -36,10 +36,10 @@ func main() {
 	go accrual.NewConsumer(pool, cfg.AccrualPollInterval).Run(ctx)
 
 	handler := httpapi.NewServer(pool, cfg.SharedSecret)
-	server := &http.Server{Addr: ":" + cfg.Port, Handler: handler}
+	server := &http.Server{Addr: cfg.BindHost + ":" + cfg.Port, Handler: handler}
 
 	go func() {
-		log.Printf("ledger service listening on :%s", cfg.Port)
+		log.Printf("ledger service listening on %s:%s", cfg.BindHost, cfg.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http: %v", err)
 		}

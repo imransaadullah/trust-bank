@@ -35,6 +35,10 @@ and keeps running as-is.
 - An outbox consumer (`internal/outbox`) that drains `event_outbox` and
   `POST`s each event to the owning tenant's webhook URL, with retry up to
   `max_retries`.
+- Binds `127.0.0.1` by default (`BIND_HOST`), never `0.0.0.0` — this
+  service is never meant to be internet-facing in any deployment model.
+  See `../../deploy/NETWORK_TOPOLOGY.md` for how this holds across SaaS,
+  on-prem, and hybrid.
 - Locked savings pockets (`internal/wallet/savings.go`) with daily interest
   accrual (`internal/accrual`) — a second ledger-account product type per
   customer, opening/funding/withdrawal composed from the same generic
@@ -53,8 +57,11 @@ and keeps running as-is.
   the tiered publishable/secret API-key model in
   `AUTHCORE_SCOPED_CLIENT_KEY_SPEC.md`. Fine for now — there's one real
   caller (the future TrustPay backend) — but replace before a second real
-  caller shows up, and don't expose this past a trusted internal network
-  as-is.
+  caller shows up. The loopback-only bind (above) is defense-in-depth
+  alongside this, not a substitute for it — a hybrid deployment moves
+  this service's caller onto a different host, at which point network
+  position alone stops being a control and the shared secret is what's
+  actually protecting the request.
 - **No KYC-tier transaction/daily limits** — `internal/wallet` and
   `internal/ledger` enforce ledger correctness (balance sufficiency,
   account status) but not policy limits by KYC tier. That's deliberately

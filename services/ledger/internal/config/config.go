@@ -9,7 +9,12 @@ import (
 )
 
 type Config struct {
-	Port        string
+	Port string
+	// BindHost defaults to loopback only — this service is never meant to
+	// be internet-facing. Override to a private/VPN interface IP (e.g. a
+	// WireGuard tunnel address) for a hybrid deployment where the caller
+	// lives on a different host; never set to 0.0.0.0.
+	BindHost    string
 	DatabaseURL string
 	// SharedSecret gates every request (Authorization: Bearer <secret>),
 	// with the calling tenant identified separately via X-Tenant-Id.
@@ -35,6 +40,11 @@ func Load() (*Config, error) {
 		port = "8080"
 	}
 
+	bindHost := os.Getenv("BIND_HOST")
+	if bindHost == "" {
+		bindHost = "127.0.0.1"
+	}
+
 	secret := os.Getenv("LEDGER_SHARED_SECRET")
 	if secret == "" {
 		return nil, fmt.Errorf("config: LEDGER_SHARED_SECRET is required")
@@ -50,7 +60,7 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		Port: port, DatabaseURL: dbURL, SharedSecret: secret,
+		Port: port, BindHost: bindHost, DatabaseURL: dbURL, SharedSecret: secret,
 		AccrualPollInterval: accrualInterval,
 	}, nil
 }

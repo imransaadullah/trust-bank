@@ -24,6 +24,9 @@ redeploying product code" literally true.
 
 **Real, verified against a live Postgres and the full Ledger/Payments/
 trustpay-backend chain:**
+- Binds `127.0.0.1` by default (`BIND_HOST`), never `0.0.0.0` — this
+  service is never meant to be internet-facing in any deployment model.
+  See `../../deploy/NETWORK_TOPOLOGY.md`.
 - Policy versioning: publishing v2 with a future `effectiveFrom` doesn't
   affect current decisions until that date arrives; looking up "as of" a
   future date correctly picks it up.
