@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	FloatAccountNumber     = "SYS-FLOAT"
-	FeeIncomeAccountNumber = "SYS-FEE-INCOME"
-	CustomerDepositsGLCode = "2100"
+	FloatAccountNumber           = "SYS-FLOAT"
+	FeeIncomeAccountNumber       = "SYS-FEE-INCOME"
+	InterestExpenseAccountNumber = "SYS-INTEREST-EXPENSE"
+	CustomerDepositsGLCode       = "2100"
 )
 
 type CreateInput struct {
@@ -37,10 +38,11 @@ type CreateInput struct {
 }
 
 // SystemAccounts are the ledger accounts every fresh tenant gets so that
-// fees and float have somewhere to post to from day one.
+// fees, float, and interest have somewhere to post to from day one.
 type SystemAccounts struct {
-	Float     *domain.LedgerAccount
-	FeeIncome *domain.LedgerAccount
+	Float           *domain.LedgerAccount
+	FeeIncome       *domain.LedgerAccount
+	InterestExpense *domain.LedgerAccount
 }
 
 func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Tenant, *SystemAccounts, error) {
@@ -99,7 +101,15 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 			return fmt.Errorf("tenant: open fee income account: %w", err)
 		}
 
-		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc}
+		interestAcc, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: t.ID, GLAccountID: chart["5100"].ID, AccountNumber: InterestExpenseAccountNumber,
+			ProductType: "interest_expense", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		})
+		if err != nil {
+			return fmt.Errorf("tenant: open interest expense account: %w", err)
+		}
+
+		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc, InterestExpense: interestAcc}
 		return nil
 	})
 	if err != nil {

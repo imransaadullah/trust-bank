@@ -10,6 +10,7 @@ import (
 	"syscall"
 	"time"
 
+	"trustbank/ledger/internal/accrual"
 	"trustbank/ledger/internal/config"
 	"trustbank/ledger/internal/dbctx"
 	"trustbank/ledger/internal/httpapi"
@@ -32,6 +33,7 @@ func main() {
 	defer pool.Close()
 
 	go outbox.NewConsumer(pool).Run(ctx)
+	go accrual.NewConsumer(pool, cfg.AccrualPollInterval).Run(ctx)
 
 	handler := httpapi.NewServer(pool, cfg.SharedSecret)
 	server := &http.Server{Addr: ":" + cfg.Port, Handler: handler}

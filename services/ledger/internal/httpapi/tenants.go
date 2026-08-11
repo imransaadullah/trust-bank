@@ -46,8 +46,9 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 			"licenseType": t.LicenseType, "deploymentMode": t.DeploymentMode, "baseCurrency": t.BaseCurrency,
 		},
 		"systemAccounts": map[string]any{
-			"floatAccountId":     sysAccounts.Float.ID,
-			"feeIncomeAccountId": sysAccounts.FeeIncome.ID,
+			"floatAccountId":           sysAccounts.Float.ID,
+			"feeIncomeAccountId":       sysAccounts.FeeIncome.ID,
+			"interestExpenseAccountId": sysAccounts.InterestExpense.ID,
 		},
 	})
 }

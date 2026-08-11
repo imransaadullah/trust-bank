@@ -27,6 +27,12 @@ import (
 	"trustbank/ledger/internal/tenant"
 )
 
+// WalletProductType is the product type every existing wallet.go function
+// resolves against — pinned explicitly now that a customer can have more
+// than one ledger account (savings.go adds "savings_locked"), so lookups
+// here can't silently resolve to the wrong one.
+const WalletProductType = "wallet"
+
 type OpenAccountInput struct {
 	TenantID           string
 	ExternalCustomerID string
@@ -44,7 +50,7 @@ func OpenAccount(ctx context.Context, pool *pgxpool.Pool, in OpenAccountInput) (
 
 	var acc *domain.LedgerAccount
 	err := dbctx.WithTenant(ctx, pool, in.TenantID, func(ctx context.Context, tx pgx.Tx) error {
-		if _, _, err := account.GetByExternalCustomerID(ctx, tx, in.TenantID, in.ExternalCustomerID); err == nil {
+		if _, _, err := account.GetByExternalCustomerID(ctx, tx, in.TenantID, in.ExternalCustomerID, WalletProductType); err == nil {
 			return ErrCustomerAlreadyHasAccount
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
@@ -75,7 +81,7 @@ func OpenAccount(ctx context.Context, pool *pgxpool.Pool, in OpenAccountInput) (
 func GetAccountByCustomer(ctx context.Context, pool *pgxpool.Pool, tenantID, externalCustomerID string) (*domain.LedgerAccount, error) {
 	var result *domain.LedgerAccount
 	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		acc, _, err := account.GetByExternalCustomerID(ctx, tx, tenantID, externalCustomerID)
+		acc, _, err := account.GetByExternalCustomerID(ctx, tx, tenantID, externalCustomerID, WalletProductType)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrCustomerAccountNotFound
@@ -197,7 +203,7 @@ func RecordWithdrawal(ctx context.Context, pool *pgxpool.Pool, in RecordWithdraw
 func resolveAccountID(ctx context.Context, pool *pgxpool.Pool, tenantID, externalCustomerID string) (string, error) {
 	var id string
 	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {
-		acc, _, err := account.GetByExternalCustomerID(ctx, tx, tenantID, externalCustomerID)
+		acc, _, err := account.GetByExternalCustomerID(ctx, tx, tenantID, externalCustomerID, WalletProductType)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return ErrCustomerAccountNotFound

@@ -4,6 +4,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
+	"time"
 )
 
 type Config struct {
@@ -17,6 +19,9 @@ type Config struct {
 	// included. Do not expose this service outside a trusted network, and
 	// replace this before onboarding a real tenant.
 	SharedSecret string
+	// AccrualPollInterval defaults to 24h in production; tests call
+	// accrual.Consumer.RunOnce directly rather than waiting on this.
+	AccrualPollInterval time.Duration
 }
 
 func Load() (*Config, error) {
@@ -35,5 +40,17 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("config: LEDGER_SHARED_SECRET is required")
 	}
 
-	return &Config{Port: port, DatabaseURL: dbURL, SharedSecret: secret}, nil
+	accrualInterval := 24 * time.Hour
+	if raw := os.Getenv("ACCRUAL_POLL_INTERVAL_MINUTES"); raw != "" {
+		minutes, err := strconv.Atoi(raw)
+		if err != nil {
+			return nil, fmt.Errorf("config: ACCRUAL_POLL_INTERVAL_MINUTES must be an integer: %w", err)
+		}
+		accrualInterval = time.Duration(minutes) * time.Minute
+	}
+
+	return &Config{
+		Port: port, DatabaseURL: dbURL, SharedSecret: secret,
+		AccrualPollInterval: accrualInterval,
+	}, nil
 }

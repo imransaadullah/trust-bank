@@ -59,6 +59,22 @@ class LedgerClient {
       externalCustomerId, amount, reference, idempotencyKey, description,
     });
   }
+
+  openSavingsAccount({ externalCustomerId, annualRateBps, lockDays, principalKobo, reference, idempotencyKey, description }) {
+    return this._request('POST', '/v1/savings/accounts', {
+      externalCustomerId, annualRateBps, lockDays, principalKobo, reference, idempotencyKey, description,
+    });
+  }
+
+  withdrawSavings(savingsAccountId, { externalCustomerId, amount, reference, idempotencyKey, description }) {
+    return this._request('POST', `/v1/savings/accounts/${savingsAccountId}/withdraw`, {
+      externalCustomerId, amount, reference, idempotencyKey, description,
+    });
+  }
+
+  listSavingsAccounts(externalCustomerId) {
+    return this._request('GET', `/v1/customers/${encodeURIComponent(externalCustomerId)}/savings-accounts`);
+  }
 }
 
 module.exports = new LedgerClient();

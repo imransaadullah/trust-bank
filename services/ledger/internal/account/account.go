@@ -26,6 +26,7 @@ type OpenInput struct {
 	KYCTier              int
 	IsSystemAccount      bool
 	AllowNegativeBalance bool
+	Metadata             []byte // optional JSON — e.g. savings.go's rate/lock terms. Defaults to '{}'.
 }
 
 const uniqueViolationCode = "23505"
@@ -59,19 +60,25 @@ func Open(ctx context.Context, tx pgx.Tx, in OpenInput) (*domain.LedgerAccount, 
 			candidate = num
 		}
 
+		metadata := in.Metadata
+		if metadata == nil {
+			metadata = []byte("{}")
+		}
+
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ledger_accounts (
 				tenant_id, gl_account_id, account_number, external_customer_id,
-				product_type, currency, kyc_tier, is_system_account, allow_negative_balance
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+				product_type, currency, kyc_tier, is_system_account, allow_negative_balance, metadata
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 			RETURNING id, status, created_at
 		`, in.TenantID, in.GLAccountID, candidate, in.ExternalCustomerID,
-			in.ProductType, currency, in.KYCTier, in.IsSystemAccount, in.AllowNegativeBalance)
+			in.ProductType, currency, in.KYCTier, in.IsSystemAccount, in.AllowNegativeBalance, metadata)
 
 		acc := &domain.LedgerAccount{
 			TenantID: in.TenantID, GLAccountID: in.GLAccountID, AccountNumber: candidate,
 			ExternalCustomerID: in.ExternalCustomerID, ProductType: in.ProductType, Currency: currency,
 			KYCTier: in.KYCTier, IsSystemAccount: in.IsSystemAccount, AllowNegativeBalance: in.AllowNegativeBalance,
+			Metadata: metadata,
 		}
 		err := row.Scan(&acc.ID, &acc.Status, &acc.CreatedAt)
 		if err == nil {
@@ -127,25 +134,106 @@ func Get(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID string) (*dom
 }
 
 // GetByExternalCustomerID looks up a tenant's ledger account for a
-// customer by the ID the calling backend uses for them — the lookup a
-// wallet product actually needs; nothing outside the ledger should have
-// to track raw ledger_account_id values.
-func GetByExternalCustomerID(ctx context.Context, tx pgx.Tx, tenantID, externalCustomerID string) (*domain.LedgerAccount, domain.Direction, error) {
+// customer by the ID the calling backend uses for them, scoped to a
+// product type. A customer can have more than one ledger account now
+// (a wallet, one or more savings pockets) — productType is what keeps
+// this resolving to the right one; every existing caller pins it to
+// "wallet" to preserve exactly the behavior this had before savings
+// existed. Use ListByExternalCustomerIDAndProduct for products where a
+// customer can have more than one (savings).
+func GetByExternalCustomerID(ctx context.Context, tx pgx.Tx, tenantID, externalCustomerID, productType string) (*domain.LedgerAccount, domain.Direction, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
 		       la.product_type, la.kyc_tier, coa.normal_balance
 		FROM ledger_accounts la
 		JOIN chart_of_accounts coa ON coa.id = la.gl_account_id
-		WHERE la.tenant_id = $1 AND la.external_customer_id = $2
-	`, tenantID, externalCustomerID)
+		WHERE la.tenant_id = $1 AND la.external_customer_id = $2 AND la.product_type = $3
+	`, tenantID, externalCustomerID, productType)
 
 	acc := &domain.LedgerAccount{TenantID: tenantID, ExternalCustomerID: &externalCustomerID}
 	var normal domain.Direction
 	if err := row.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
 		&acc.ProductType, &acc.KYCTier, &normal); err != nil {
-		return nil, "", fmt.Errorf("account: get by external customer %s: %w", externalCustomerID, err)
+		return nil, "", fmt.Errorf("account: get by external customer %s (product %s): %w", externalCustomerID, productType, err)
 	}
 	return acc, normal, nil
+}
+
+// ListByExternalCustomerIDAndProduct returns every account a customer has
+// of a given product type — a customer can have several savings pockets,
+// unlike the single wallet GetByExternalCustomerID resolves.
+func ListByExternalCustomerIDAndProduct(ctx context.Context, tx pgx.Tx, tenantID, externalCustomerID, productType string) ([]domain.LedgerAccount, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
+		       la.product_type, la.kyc_tier, la.metadata, la.created_at
+		FROM ledger_accounts la
+		WHERE la.tenant_id = $1 AND la.external_customer_id = $2 AND la.product_type = $3
+		ORDER BY la.created_at
+	`, tenantID, externalCustomerID, productType)
+	if err != nil {
+		return nil, fmt.Errorf("account: list by external customer %s (product %s): %w", externalCustomerID, productType, err)
+	}
+	defer rows.Close()
+
+	var accounts []domain.LedgerAccount
+	for rows.Next() {
+		acc := domain.LedgerAccount{TenantID: tenantID, ExternalCustomerID: &externalCustomerID}
+		if err := rows.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
+			&acc.ProductType, &acc.KYCTier, &acc.Metadata, &acc.CreatedAt); err != nil {
+			return nil, fmt.Errorf("account: scan list row: %w", err)
+		}
+		accounts = append(accounts, acc)
+	}
+	return accounts, rows.Err()
+}
+
+// ListByProductType returns every account of a given product type for a
+// tenant, regardless of customer — what the interest accrual job needs
+// to find every savings pocket across a tenant, not just one customer's.
+func ListByProductType(ctx context.Context, tx pgx.Tx, tenantID, productType string) ([]domain.LedgerAccount, error) {
+	rows, err := tx.Query(ctx, `
+		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
+		       la.product_type, la.external_customer_id, la.metadata, la.created_at
+		FROM ledger_accounts la
+		WHERE la.tenant_id = $1 AND la.product_type = $2 AND la.status = 'ACTIVE'
+		ORDER BY la.created_at
+	`, tenantID, productType)
+	if err != nil {
+		return nil, fmt.Errorf("account: list by product type %s: %w", productType, err)
+	}
+	defer rows.Close()
+
+	var accounts []domain.LedgerAccount
+	for rows.Next() {
+		acc := domain.LedgerAccount{TenantID: tenantID}
+		if err := rows.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
+			&acc.ProductType, &acc.ExternalCustomerID, &acc.Metadata, &acc.CreatedAt); err != nil {
+			return nil, fmt.Errorf("account: scan list-by-product row: %w", err)
+		}
+		accounts = append(accounts, acc)
+	}
+	return accounts, rows.Err()
+}
+
+// GetSavingsAccount loads a ledger account with the fields savings-specific
+// operations need (metadata, for the lock/rate; product type and external
+// customer id, to confirm it's actually a savings account owned by the
+// caller) — kept separate from Get, which stays lean since it's on the
+// hot path for every transaction's balance-guard check.
+func GetSavingsAccount(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID string) (*domain.LedgerAccount, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
+		       la.product_type, la.external_customer_id, la.metadata, la.created_at
+		FROM ledger_accounts la
+		WHERE la.tenant_id = $1 AND la.id = $2
+	`, tenantID, ledgerAccountID)
+
+	acc := &domain.LedgerAccount{TenantID: tenantID}
+	if err := row.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
+		&acc.ProductType, &acc.ExternalCustomerID, &acc.Metadata, &acc.CreatedAt); err != nil {
+		return nil, fmt.Errorf("account: get savings account %s: %w", ledgerAccountID, err)
+	}
+	return acc, nil
 }
 
 // GetByAccountNumber looks up a ledger account by its account number —

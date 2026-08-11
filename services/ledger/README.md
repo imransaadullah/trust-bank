@@ -35,6 +35,17 @@ and keeps running as-is.
 - An outbox consumer (`internal/outbox`) that drains `event_outbox` and
   `POST`s each event to the owning tenant's webhook URL, with retry up to
   `max_retries`.
+- Locked savings pockets (`internal/wallet/savings.go`) with daily interest
+  accrual (`internal/accrual`) — a second ledger-account product type per
+  customer, opening/funding/withdrawal composed from the same generic
+  journal-entry primitive P2P and deposits use, no new ledger concept
+  needed. Verified live: opening debits the wallet and credits the new
+  savings account exactly; an early withdrawal against a 30-day lock is
+  rejected with the maturity date; a matured (`lockDays: 0`) withdrawal
+  succeeds and returns funds to the wallet; the background accrual
+  goroutine fired on its own during a live run and posted exactly the
+  expected interest (1,000,000 kobo at 3650bps → 1,000 kobo/day), then
+  correctly did nothing on a second same-day tick.
 
 **Explicit placeholders, not production-ready:**
 - **Auth** (`internal/httpapi/middleware.go`, `internal/config`) — a single
@@ -53,6 +64,22 @@ and keeps running as-is.
   with exponential backoff, and a process crash mid-batch can leave rows
   stuck at `processing`. Documented in `internal/outbox`'s package comment.
   Fine at MVP volume; revisit before this carries real traffic.
+- **No early savings withdrawal / penalty path** — a locked pocket is
+  strictly locked this pass; breaking it early isn't supported, not a
+  half-built feature.
+- **No centralized savings product catalog** — the interest rate and lock
+  period are set per-account at open time (in that account's own
+  `metadata`), not drawn from a tenant-wide list of product tiers a
+  customer picks from. Fine for one flat product; revisit if TrustPay
+  wants multiple named savings products with fixed terms.
+
+**A bug worth knowing about if you're extending this:** `account.GetByExternalCustomerID`
+now takes a `productType` argument — a customer can have more than one
+ledger account (a wallet, one or more savings pockets), and an unscoped
+lookup would non-deterministically resolve to whichever one Postgres
+returned first. Every existing caller in `internal/wallet/wallet.go` pins
+this to `"wallet"`; if you add a third product type, don't reuse an
+unscoped lookup for it.
 
 ## Setup
 
@@ -119,6 +146,20 @@ curl -X POST localhost:8080/v1/transfers/withdrawal \
 curl localhost:8080/v1/accounts/$ACCOUNT_ID/balance \
   -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID"
 
+# Open and fund a locked savings pocket (rate in basis points, e.g. 1200 = 12% APY).
+curl -X POST localhost:8080/v1/savings/accounts \
+  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -d '{"externalCustomerId":"user-123","annualRateBps":1200,"lockDays":30,"principalKobo":1000000,"reference":"SAV-1","idempotencyKey":"idem-sav-1"}'
+
+# Withdraw from a matured savings account — rejected with the maturity
+# date if called before lockDays has elapsed.
+curl -X POST localhost:8080/v1/savings/accounts/$SAVINGS_ACCOUNT_ID/withdraw \
+  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -d '{"externalCustomerId":"user-123","amount":50000,"reference":"SAVWD-1","idempotencyKey":"idem-savwd-1"}'
+
+curl localhost:8080/v1/customers/user-123/savings-accounts \
+  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID"
+
 # Generic multi-leg entry and reversal are still available directly for
 # anything the convenience routes above don't cover:
 curl -X POST localhost:8080/v1/journal-entries ...
@@ -137,22 +178,29 @@ internal/dbctx/       the one on-ramp for tenant-scoped writes (Serializable tx 
 internal/coa/         chart of accounts
 internal/account/     ledger accounts + balance derivation
 internal/ledger/      journal entries — post, reverse, the generic primitive
-internal/wallet/      product-level ops (open account, p2p, deposit/withdrawal) over internal/ledger
+internal/wallet/      product-level ops (open account, p2p, deposit/withdrawal, savings) over internal/ledger
+internal/accrual/     daily interest posting for locked savings accounts
 internal/outbox/      drains event_outbox to tenant webhooks
 internal/tenant/      tenant provisioning
 internal/httpapi/     thin HTTP layer — no business logic
-cmd/ledger/           entrypoint — starts the HTTP server and the outbox consumer goroutine
+cmd/ledger/           entrypoint — starts the HTTP server, the outbox consumer, and the accrual consumer goroutines
 ```
 
 ## Testing
 
-`internal/ledger/service_test.go` and `internal/wallet/wallet_test.go` are
-real integration suites (`DATABASE_URL` required, skip cleanly if unset)
-covering: balanced posting, unbalanced rejection, insufficient-balance
-rejection, idempotent replay, reversal + double-reversal rejection,
-row-level security actually blocking a query that omits `tenant_id` from
-its `WHERE` clause, account opening + duplicate-customer rejection, P2P
-between two real accounts, and deposit/withdrawal recording.
+`internal/ledger/service_test.go`, `internal/wallet/wallet_test.go`,
+`internal/wallet/savings_test.go`, and `internal/accrual/accrual_test.go`
+are real integration suites (`DATABASE_URL` required, skip cleanly if
+unset) covering: balanced posting, unbalanced rejection,
+insufficient-balance rejection, idempotent replay, reversal +
+double-reversal rejection, row-level security actually blocking a query
+that omits `tenant_id` from its `WHERE` clause, account opening +
+duplicate-customer rejection, P2P between two real accounts,
+deposit/withdrawal recording, savings funding/lock-enforcement/maturity,
+a customer with both a wallet and a savings account still resolving P2P/
+deposit/withdrawal to the wallet (the regression case for the
+`GetByExternalCustomerID` product-type fix), and interest accrual math +
+same-day idempotency.
 
 ## Deployment (VPS / systemd)
 

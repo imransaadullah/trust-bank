@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/auth');
 const kycRoutes = require('./routes/kyc');
 const walletRoutes = require('./routes/wallet');
+const savingsRoutes = require('./routes/savings');
 
 function createApp() {
   const app = express();
@@ -18,6 +19,7 @@ function createApp() {
   app.use('/auth', authRoutes);
   app.use('/kyc', kycRoutes);
   app.use('/wallet', walletRoutes);
+  app.use('/savings', savingsRoutes);
 
   app.use(errorHandler);
 

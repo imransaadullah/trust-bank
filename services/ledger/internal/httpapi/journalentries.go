@@ -121,6 +121,12 @@ func respondWalletError(w http.ResponseWriter, err error) {
 		respondError(w, http.StatusNotFound, err.Error())
 	case errors.Is(err, wallet.ErrSameAccount):
 		respondError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, wallet.ErrSavingsAccountNotFound):
+		respondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, wallet.ErrSavingsAccountNotOwned):
+		respondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, wallet.ErrSavingsLocked):
+		respondError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ledger.ErrInsufficientBalance):
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ledger.ErrUnbalancedEntry), errors.Is(err, ledger.ErrTooFewLines), errors.Is(err, ledger.ErrNonPositiveAmount):

@@ -32,6 +32,10 @@ instances during development:**
   a generic 500), and — tested as an independent case, not conflated
   with the KYC-tier check — a brand-new device is capped at ₦20,000
   even when well within the KYC-tier daily limit and the user's balance
+- Savings, via the Ledger's `internal/wallet/savings.go` and
+  `internal/accrual` directly (`/savings` here is a thin pass-through —
+  see `services/ledger`'s README for what was verified live: open/fund,
+  lock enforcement, matured withdrawal, and the background interest job)
 
 **Not verified — needs live credentials this environment doesn't have:**
 `/auth/send-otp` and `/auth/verify-otp` against a real AuthCore OTP
@@ -86,6 +90,12 @@ curl -X POST localhost:8082/wallet/withdraw -H "Authorization: Bearer $TOKEN" \
   -d '{"amount":10000,"beneficiaryAccountNumber":"0123456789","beneficiaryBankCode":"058"}'
 
 curl localhost:8082/wallet/transactions -H "Authorization: Bearer $TOKEN"
+
+curl -X POST localhost:8082/savings -H "Authorization: Bearer $TOKEN" \
+  -d '{"annualRateBps":1200,"lockDays":30,"principalKobo":1000000}'
+curl -X POST localhost:8082/savings/$SAVINGS_ACCOUNT_ID/withdraw -H "Authorization: Bearer $TOKEN" \
+  -d '{"amount":50000}'
+curl localhost:8082/savings -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Layout
@@ -96,7 +106,7 @@ prisma/               User, Device, Transaction (local statement cache — the
 src/services/          authCoreClient, authTokenVerifier (lifted from
                        truechat/backend, JWKS-only), ledgerClient, paymentsClient,
                        complianceClient
-src/routes/            auth, kyc, wallet
+src/routes/            auth, kyc, wallet, savings
 src/middleware/auth.js  verifies this backend's own JWT (not AuthCore's, not
                        the Ledger's/Payments'/Compliance's shared secrets) and
                        attaches the device claim minted at login
