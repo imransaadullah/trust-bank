@@ -8,6 +8,7 @@ function requireAuth(req, res, next) {
   try {
     const payload = jwtService.verifyToken(auth.slice('Bearer '.length));
     req.userId = payload.sub;
+    req.deviceId = payload.deviceId;
     next();
   } catch (_err) {
     return res.status(401).json({ success: false, error: 'Invalid or expired token' });

@@ -1,0 +1,31 @@
+{
+  "name": "trustbank-compliance",
+  "version": "0.1.0",
+  "description": "trust-bank Compliance service — versioned, tenant/jurisdiction-scoped policy decisions (KYC-tier limits, device binding) so regulation is data, not hardcoded product rules.",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate": "npx prisma migrate dev",
+    "prisma:deploy": "npx prisma migrate deploy",
+    "postinstall": "npx prisma generate",
+    "test": "jest --forceExit",
+    "test:watch": "jest --watch"
+  },
+  "license": "ISC",
+  "dependencies": {
+    "@prisma/client": "^6.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "helmet": "^7.0.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.0",
+    "prisma": "^6.1.0",
+    "supertest": "^6.3.4"
+  }
+}

@@ -25,4 +25,13 @@ class UserNotFoundError extends TrustPayError {
   }
 }
 
-module.exports = { TrustPayError, InvalidOtpError, KYCTierRequiredError, UserNotFoundError };
+// Raised when services/compliance's decision endpoints return
+// { allowed: false } — a regulatory limit (KYC-tier daily/single-txn cap,
+// device-binding cap), not a product-level gate like KYCTierRequiredError.
+class ComplianceDeniedError extends TrustPayError {
+  constructor(reason) {
+    super(reason || 'This action is not allowed', 'COMPLIANCE_DENIED', 403);
+  }
+}
+
+module.exports = { TrustPayError, InvalidOtpError, KYCTierRequiredError, UserNotFoundError, ComplianceDeniedError };

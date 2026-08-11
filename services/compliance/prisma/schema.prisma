@@ -1,0 +1,57 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// KYC TIER POLICY
+// Immutable, versioned — a rule change is a new row with a higher
+// version and its own effectiveFrom, never an update to an existing
+// row. "Current policy" for (tenantId, jurisdiction, tier) is the
+// highest version whose effectiveFrom has passed. This is what makes
+// "regulation changes without redeploying product code" literally
+// true, and every decision response carries the version applied as
+// its audit trail.
+// ============================================
+model KYCTierPolicy {
+  id                    String   @id @default(uuid())
+  tenantId              String   @map("tenant_id")
+  jurisdiction          String   @default("NG")
+  tier                  Int      // 1, 2, or 3 — matches CBN's actual tiers, not an internal scheme
+  requiredVerifications Json     @map("required_verifications") // e.g. ["bvn_or_nin"], ["gov_id", "address"]
+  dailyLimitKobo        Int?     @map("daily_limit_kobo") // null = unlimited (Tier 3)
+  singleTxnLimitKobo    Int?     @map("single_txn_limit_kobo")
+  version               Int
+  effectiveFrom         DateTime @map("effective_from")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, jurisdiction, tier, version])
+  @@index([tenantId, jurisdiction, tier, effectiveFrom])
+  @@map("kyc_tier_policies")
+}
+
+// ============================================
+// DEVICE BINDING POLICY
+// Same versioning discipline as KYCTierPolicy. One device at a time
+// per user; a new device is capped for a cooldown window — CBN rule
+// live since July 1, 2026.
+// ============================================
+model DeviceBindingPolicy {
+  id                     String   @id @default(uuid())
+  tenantId               String   @map("tenant_id")
+  jurisdiction           String   @default("NG")
+  maxActiveDevices       Int      @default(1) @map("max_active_devices")
+  newDeviceCooldownHours Int      @map("new_device_cooldown_hours")
+  newDeviceLimitKobo     Int      @map("new_device_limit_kobo")
+  version                Int
+  effectiveFrom          DateTime @map("effective_from")
+  createdAt              DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, jurisdiction, version])
+  @@index([tenantId, jurisdiction, effectiveFrom])
+  @@map("device_binding_policies")
+}

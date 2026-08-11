@@ -13,26 +13,55 @@ datasource db {
 // service owns identity/KYC only, not chat/social features. The Ledger
 // account is opened at Tier 0 on first login (see routes/auth.js) and
 // referenced here by id, not duplicated — balance is never stored here.
+//
+// kycTier: 0 = our own unverified/pending onboarding gate (not a CBN
+// tier — matches COMPLIANCE_DESIGN_AND_BACKLOG.md's distinction between
+// compliance policy and product state). 1 = CBN Tier 1 (BVN/NIN
+// verified). Tiers 2/3 are supported by services/compliance's policy
+// model already; their verification flows (gov ID/address, beneficial
+// ownership) aren't built yet — this field is ready for them.
 // ============================================
 model User {
-  id                  String    @id @default(uuid())
-  phoneNumber         String    @unique @map("phone_number")
-  displayName         String?   @map("display_name")
-  authCoreUid         String?   @unique @map("authcore_uid")
+  id          String  @id @default(uuid())
+  phoneNumber String  @unique @map("phone_number")
+  displayName String? @map("display_name")
+  authCoreUid String? @unique @map("authcore_uid")
 
-  ledgerAccountId     String?   @unique @map("ledger_account_id")
-  ledgerAccountNumber String?   @map("ledger_account_number")
+  ledgerAccountId     String? @unique @map("ledger_account_id")
+  ledgerAccountNumber String? @map("ledger_account_number")
 
-  kycTier             Int       @default(0) @map("kyc_tier")
-  kycStatus           String    @default("not_started") @map("kyc_status") // not_started | pending | verified | rejected
-  bvnVerifiedAt        DateTime? @map("bvn_verified_at")
+  kycTier       Int       @default(0) @map("kyc_tier")
+  kycStatus     String    @default("not_started") @map("kyc_status") // not_started | pending | verified | rejected
+  bvnVerifiedAt DateTime? @map("bvn_verified_at")
 
-  createdAt           DateTime  @default(now()) @map("created_at")
-  updatedAt           DateTime  @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
-  transactions        Transaction[]
+  transactions Transaction[]
+  devices      Device[]
 
   @@map("users")
+}
+
+// ============================================
+// DEVICE
+// Per-user device registry — the fact-tracking half of device binding.
+// services/compliance holds the *policy* (cooldown hours, new-device
+// cap) and is stateless; this table holds the *facts* (has this device
+// been seen before, since when) that get passed to it. CBN's device
+// binding rule has been mandatory since July 1, 2026.
+// ============================================
+model Device {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  deviceId    String   @map("device_id") // client-generated, stable identifier
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @map("last_seen_at")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@unique([userId, deviceId])
+  @@map("devices")
 }
 
 // ============================================
@@ -43,18 +72,18 @@ model User {
 // populate a row here, so this avoids adding one right now.
 // ============================================
 model Transaction {
-  id                  String   @id @default(uuid())
-  userId              String   @map("user_id")
-  type                String   // 'deposit' | 'p2p_sent' | 'p2p_received' | 'withdrawal'
-  amount              Int      // minor units (kobo)
-  counterpartyUserId  String?  @map("counterparty_user_id")
-  counterpartyLabel   String?  @map("counterparty_label")
-  journalEntryId      String   @map("journal_entry_id")
-  status              String   @default("completed") // completed | failed | reversed
-  description         String?
-  createdAt           DateTime @default(now()) @map("created_at")
+  id                 String   @id @default(uuid())
+  userId             String   @map("user_id")
+  type               String // 'deposit' | 'p2p_sent' | 'p2p_received' | 'withdrawal'
+  amount             Int // minor units (kobo)
+  counterpartyUserId String?  @map("counterparty_user_id")
+  counterpartyLabel  String?  @map("counterparty_label")
+  journalEntryId     String   @map("journal_entry_id")
+  status             String   @default("completed") // completed | failed | reversed
+  description        String?
+  createdAt          DateTime @default(now()) @map("created_at")
 
-  user                User     @relation(fields: [userId], references: [id])
+  user User @relation(fields: [userId], references: [id])
 
   @@index([userId, createdAt])
   @@map("transactions")

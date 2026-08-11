@@ -1,9 +1,9 @@
 const jwt = require('jsonwebtoken');
 const config = require('../config');
 
-function mintToken(user) {
+function mintToken(user, deviceId) {
   return jwt.sign(
-    { sub: user.id, phone: user.phoneNumber, kycTier: user.kycTier },
+    { sub: user.id, phone: user.phoneNumber, kycTier: user.kycTier, deviceId },
     config.jwt.secret,
     { expiresIn: config.jwt.expiry }
   );

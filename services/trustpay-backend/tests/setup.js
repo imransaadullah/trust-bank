@@ -5,5 +5,7 @@ process.env.LEDGER_SERVICE_URL = process.env.LEDGER_SERVICE_URL || 'http://local
 process.env.LEDGER_SHARED_SECRET = process.env.LEDGER_SHARED_SECRET || 'test-secret';
 process.env.PAYMENTS_SERVICE_URL = process.env.PAYMENTS_SERVICE_URL || 'http://localhost:8081';
 process.env.PAYMENTS_SHARED_SECRET = process.env.PAYMENTS_SHARED_SECRET || 'test-secret';
+process.env.COMPLIANCE_SERVICE_URL = process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083';
+process.env.COMPLIANCE_SHARED_SECRET = process.env.COMPLIANCE_SHARED_SECRET || 'test-secret';
 process.env.AUTHCORE_BASE_URL = process.env.AUTHCORE_BASE_URL || 'https://authcore.akoti.com.ng';
 process.env.AUTHCORE_PROJECT_KEY = process.env.AUTHCORE_PROJECT_KEY || 'test-project-key';

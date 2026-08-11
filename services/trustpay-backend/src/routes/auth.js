@@ -23,9 +23,9 @@ router.post('/send-otp', async (req, res, next) => {
 
 router.post('/verify-otp', async (req, res, next) => {
   try {
-    const { phone, code } = req.body;
-    if (!phone || !code) {
-      return res.status(400).json({ success: false, error: 'phone and code are required' });
+    const { phone, code, deviceId } = req.body;
+    if (!phone || !code || !deviceId) {
+      return res.status(400).json({ success: false, error: 'phone, code, and deviceId are required' });
     }
 
     const { access_token: accessToken } = await authCoreClient.verifyPhoneOtp(phone, code);
@@ -58,7 +58,21 @@ router.post('/verify-otp', async (req, res, next) => {
       }
     }
 
-    const token = jwtService.mintToken(user);
+    // Device binding (CBN, mandatory since July 1, 2026): trustpay-backend
+    // owns the fact ("has this device been seen for this user, since
+    // when") — services/compliance owns the policy (cooldown, cap) and
+    // is consulted at transaction time in routes/wallet.js, not here.
+    const existingDevice = await prisma.device.findUnique({
+      where: { userId_deviceId: { userId: user.id, deviceId } },
+    });
+    const isNewDevice = !existingDevice;
+    if (existingDevice) {
+      await prisma.device.update({ where: { id: existingDevice.id }, data: { lastSeenAt: new Date() } });
+    } else {
+      await prisma.device.create({ data: { userId: user.id, deviceId } });
+    }
+
+    const token = jwtService.mintToken(user, deviceId);
     res.json({
       success: true,
       data: {
@@ -67,6 +81,7 @@ router.post('/verify-otp', async (req, res, next) => {
           id: user.id, phoneNumber: user.phoneNumber, kycTier: user.kycTier,
           walletReady: !!user.ledgerAccountId,
         },
+        isNewDevice,
       },
     });
   } catch (err) {

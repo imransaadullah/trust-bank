@@ -34,4 +34,8 @@ module.exports = {
     baseUrl: process.env.PAYMENTS_SERVICE_URL || 'http://localhost:8081',
     sharedSecret: required('PAYMENTS_SHARED_SECRET'),
   },
+  compliance: {
+    baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083',
+    sharedSecret: required('COMPLIANCE_SHARED_SECRET'),
+  },
 };

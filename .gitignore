@@ -4,4 +4,6 @@ services/payments/node_modules/
 services/payments/.env
 services/trustpay-backend/node_modules/
 services/trustpay-backend/.env
+services/compliance/node_modules/
+services/compliance/.env
 *.log
