@@ -1,0 +1,61 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER
+// TrustPay's own, much smaller than TrustChat's User model — this
+// service owns identity/KYC only, not chat/social features. The Ledger
+// account is opened at Tier 0 on first login (see routes/auth.js) and
+// referenced here by id, not duplicated — balance is never stored here.
+// ============================================
+model User {
+  id                  String    @id @default(uuid())
+  phoneNumber         String    @unique @map("phone_number")
+  displayName         String?   @map("display_name")
+  authCoreUid         String?   @unique @map("authcore_uid")
+
+  ledgerAccountId     String?   @unique @map("ledger_account_id")
+  ledgerAccountNumber String?   @map("ledger_account_number")
+
+  kycTier             Int       @default(0) @map("kyc_tier")
+  kycStatus           String    @default("not_started") @map("kyc_status") // not_started | pending | verified | rejected
+  bvnVerifiedAt        DateTime? @map("bvn_verified_at")
+
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  transactions        Transaction[]
+
+  @@map("users")
+}
+
+// ============================================
+// TRANSACTION
+// Local statement/history cache — written at the moment a call to the
+// Ledger or Payments succeeds. The Ledger has no list-entries endpoint
+// yet, and every successful call already returns what's needed to
+// populate a row here, so this avoids adding one right now.
+// ============================================
+model Transaction {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  type                String   // 'deposit' | 'p2p_sent' | 'p2p_received' | 'withdrawal'
+  amount              Int      // minor units (kobo)
+  counterpartyUserId  String?  @map("counterparty_user_id")
+  counterpartyLabel   String?  @map("counterparty_label")
+  journalEntryId      String   @map("journal_entry_id")
+  status              String   @default("completed") // completed | failed | reversed
+  description         String?
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  user                User     @relation(fields: [userId], references: [id])
+
+  @@index([userId, createdAt])
+  @@map("transactions")
+}

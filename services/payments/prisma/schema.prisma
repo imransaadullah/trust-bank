@@ -1,0 +1,86 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// TENANT PROVIDER CONFIG
+// One row per tenant — which rail it uses and that rail's credentials.
+// tenantId references the Ledger service's tenant id (services/ledger),
+// not a local foreign key — Payments doesn't own tenant identity, the
+// Ledger does. Credentials are encrypted (see src/crypto/tenantSecrets.js)
+// before they ever reach this table.
+// ============================================
+model TenantProviderConfig {
+  id                 String   @id @default(uuid())
+  tenantId           String   @unique @map("tenant_id")
+  tenantSlug         String   @unique @map("tenant_slug") // used to route inbound webhooks (URL has no room for a UUID lookup pre-auth)
+  provider           String   // 'paystack' | 'self_issued_nuban'
+  status             String   @default("active") // 'active' | 'inactive'
+  encryptedCredentials String @map("encrypted_credentials") // AES-256-GCM, base64: iv.authTag.ciphertext
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @updatedAt @map("updated_at")
+
+  settlementAttempts SettlementAttempt[]
+
+  @@index([provider])
+  @@map("tenant_provider_configs")
+}
+
+// ============================================
+// PROVISIONED ACCOUNTS
+// The mapping a webhook resolution actually needs: a provider hands back
+// an account number (a Paystack DVA, eventually a self-issued NUBAN) at
+// provisioning time, but a webhook only carries that account number back
+// — not the externalCustomerId the Ledger's deposit/confirm needs. This
+// is that reverse lookup, established once at provisionAccount time.
+// ============================================
+model ProvisionedAccount {
+  id                 String   @id @default(uuid())
+  tenantId           String   @map("tenant_id")
+  externalCustomerId String   @map("external_customer_id")
+  provider           String
+  accountNumber      String   @map("account_number")
+  bankCode           String?  @map("bank_code")
+  bankName           String?  @map("bank_name")
+  metadata           Json?
+  createdAt          DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, accountNumber])
+  @@unique([tenantId, externalCustomerId])
+  @@index([tenantId, externalCustomerId])
+  @@map("provisioned_accounts")
+}
+
+// ============================================
+// SETTLEMENT ATTEMPTS
+// Independent audit trail of every resolved inbound/outbound attempt —
+// the record you'd need in a dispute, separate from the Ledger's own
+// append-only journal (which only knows "an entry was posted", not
+// "here's the raw provider payload that led to it").
+// ============================================
+model SettlementAttempt {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  direction           String   // 'inbound' | 'outbound'
+  provider            String
+  providerRef         String   @map("provider_ref")
+  externalCustomerId  String?  @map("external_customer_id")
+  amount              Int      // minor units (kobo)
+  status              String   @default("pending") // 'pending' | 'resolved' | 'failed'
+  journalEntryId      String?  @map("journal_entry_id") // set once the Ledger confirms
+  failureReason       String?  @map("failure_reason")
+  rawPayload          Json?    @map("raw_payload")
+  createdAt           DateTime @default(now()) @map("created_at")
+  resolvedAt          DateTime? @map("resolved_at")
+
+  tenantConfig        TenantProviderConfig @relation(fields: [tenantId], references: [tenantId])
+
+  @@unique([tenantId, provider, providerRef])
+  @@index([tenantId, status])
+  @@map("settlement_attempts")
+}

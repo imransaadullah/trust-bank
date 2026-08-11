@@ -1,0 +1,9 @@
+process.env.TRUSTPAY_JWT_SECRET = process.env.TRUSTPAY_JWT_SECRET || 'test-jwt-secret';
+process.env.TRUSTPAY_JWT_EXPIRY = process.env.TRUSTPAY_JWT_EXPIRY || '7d';
+process.env.TENANT_ID = process.env.TENANT_ID || 'test-tenant-id';
+process.env.LEDGER_SERVICE_URL = process.env.LEDGER_SERVICE_URL || 'http://localhost:8080';
+process.env.LEDGER_SHARED_SECRET = process.env.LEDGER_SHARED_SECRET || 'test-secret';
+process.env.PAYMENTS_SERVICE_URL = process.env.PAYMENTS_SERVICE_URL || 'http://localhost:8081';
+process.env.PAYMENTS_SHARED_SECRET = process.env.PAYMENTS_SHARED_SECRET || 'test-secret';
+process.env.AUTHCORE_BASE_URL = process.env.AUTHCORE_BASE_URL || 'https://authcore.akoti.com.ng';
+process.env.AUTHCORE_PROJECT_KEY = process.env.AUTHCORE_PROJECT_KEY || 'test-project-key';
