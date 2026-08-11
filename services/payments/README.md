@@ -29,14 +29,32 @@ Paystack HTTP round trip:**
   fail (fake credentials — genuinely rejected by Paystack, not simulated)
   and confirmed the ledger debit gets reversed automatically.
 - Tenant credential encryption round-trips and rejects tampered ciphertext
-  (auth tag check).
+  (auth tag check) — including catching a real cross-process key mismatch
+  during development (a decrypt attempt against a row encrypted with a
+  different process's key failed loudly, exactly as it should).
+- **Reconciliation** (`reconciliationService.js`): a stale outbound
+  `SettlementAttempt` (webhook never arrived — the NIBSS-outage case) gets
+  polled via `provider.getTransferStatus` and resolved or reversed
+  accordingly; one still reported "processing" past the auto-refund SLA
+  gets refunded automatically regardless. Verified live: a 2-hour-old
+  stale attempt was auto-refunded and the customer's real Ledger balance
+  was restored exactly, while a 5-minute-old attempt (not yet stale) was
+  correctly left untouched in the same run. The existing webhook-driven
+  resolution path (`handleOutboundOutcome`) was re-verified unchanged
+  after being refactored to share logic with the new poll path.
 
 **Not verified — needs live Paystack credentials this environment doesn't
 have:** `provisionAccount` actually creating a Paystack DVA, `verifyIdentity`
-against real BVN/NIN data, and a *successful* payout. The code path for
-all three is the same one exercised (successfully) in the inbound test and
-(via its failure branch) in the outbound test — only the "Paystack accepts
-the request" half is unverified here.
+against real BVN/NIN data, and a *successful* payout or a genuine
+`getTransferStatus` response (its "processing" branch was verified with a
+monkey-patched provider response, not a live call). The code path for all
+of these is the same one exercised (successfully) elsewhere — only the
+"Paystack actually responds" half is unverified here.
+
+**Scoped out of reconciliation, deliberately:** inbound (a deposit that
+never arrives) has no comparable "ask the provider what happened" recovery
+path — if money never reached Paystack there's nothing to poll for. This
+pass covers outbound (withdrawal payouts) only.
 
 **Explicit placeholders:**
 - **Auth** (`src/middleware/auth.js`) — shared secret, same caveat as the
@@ -87,6 +105,11 @@ curl -X POST localhost:8081/v1/tenants/$TENANT_ID/payouts \
 # Webhook (Paystack calls this — tenantSlug in the path since a webhook
 # URL has no room for an authenticated lookup)
 # POST /v1/webhooks/:tenantSlug/paystack
+
+# On-demand reconciliation — the background runner does this automatically
+# every RECONCILIATION_POLL_INTERVAL_MINUTES, this is for ops/testing.
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/reconcile \
+  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" -d '{}'
 ```
 
 ## Layout
@@ -95,15 +118,22 @@ curl -X POST localhost:8081/v1/tenants/$TENANT_ID/payouts \
 prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt
 src/providers/         the contract (provider.js) + paystack.js + selfIssuedNuban.js (stub)
 src/crypto/            tenant credential encryption at rest
-src/services/          tenantConfigService, accountProvisioningService, settlementService, ledgerClient
-src/routes/            tenantConfig, accounts, identity, payouts, webhooks
+src/services/          tenantConfigService, accountProvisioningService, settlementService,
+                       reconciliationService, reconciliationRunner, ledgerClient
+src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation
 ```
 
 ## Testing
 
 `tests/paystackProvider.test.js` and `tests/providerConformance.test.js`
 need no live credentials or database — pure unit tests against fixtures.
-`tests/tenantSecrets.test.js` covers the encryption round trip. The
-inbound/outbound settlement flow was verified manually end-to-end against
-a live Ledger during development (see the "what's real" section above) —
-not yet captured as an automated integration test in this repo.
+`tests/tenantSecrets.test.js` covers the encryption round trip.
+`tests/reconciliation.test.js` covers `reconcileOutboundAttempt`'s four
+branches (resolved / reversed / still-pending / provider-call-failed) and
+`autoRefundStaleAttempt`, against a real Postgres with the provider's
+network call faked via `jest.spyOn` — same "real DB, faked external
+network" style as the rest of this repo's tests. The inbound settlement
+flow and the reconciliation orchestration's age-threshold branching were
+verified manually end-to-end against a live Ledger during development
+(see the "what's real" section above) — not yet captured as automated
+integration tests in this repo.

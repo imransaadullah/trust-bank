@@ -109,6 +109,16 @@ class PaystackProvider extends PaymentsProvider {
     return (result.data || []).map((b) => ({ code: b.code, name: b.name }));
   }
 
+  async getTransferStatus(reference) {
+    const result = await this._request('GET', `/transfer/verify/${encodeURIComponent(reference)}`);
+    const paystackStatus = result.data?.status;
+    if (paystackStatus === 'success') return { status: 'completed' };
+    if (paystackStatus === 'failed' || paystackStatus === 'reversed') {
+      return { status: 'failed', failureReason: result.data?.message || 'Provider confirmed transfer failure' };
+    }
+    return { status: 'processing' };
+  }
+
   verifyWebhookSignature(rawBody, signature) {
     if (!signature) return false;
     try {

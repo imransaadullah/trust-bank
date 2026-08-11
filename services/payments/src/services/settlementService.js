@@ -122,15 +122,56 @@ async function handleOutboundOutcome(tenantId, providerName, event) {
     return { handled: true, alreadyProcessed: true };
   }
 
-  if (event.type === 'withdrawal_success') {
+  const outcome = event.type === 'withdrawal_success'
+    ? { status: 'completed' }
+    : { status: 'failed', failureReason: event.failureReason || 'Provider payout failed' };
+
+  const result = await applyOutboundOutcome(tenantId, attempt, outcome);
+  return { handled: true, reversed: result.action === 'reversed' };
+}
+
+// Reconciliation's poll path (services/payments' reconciliationService.js)
+// converges here too — a webhook and a status-check both end up with the
+// same { status, failureReason? } shape, and this is the one place that
+// shape gets turned into a ledger resolve/reverse. Nothing else should
+// duplicate this state-transition logic.
+async function applyOutboundOutcome(tenantId, attempt, outcome) {
+  if (outcome.status === 'completed') {
     await prisma.settlementAttempt.update({
       where: { id: attempt.id }, data: { status: 'resolved', resolvedAt: new Date() },
     });
-    return { handled: true };
+    return { action: 'resolved' };
   }
+  if (outcome.status === 'failed') {
+    await reverseAndFail(tenantId, attempt, outcome.failureReason || 'Provider confirmed payout failure');
+    return { action: 'reversed' };
+  }
+  return { action: 'still-pending' };
+}
 
-  await reverseAndFail(tenantId, attempt, event.failureReason || 'Provider payout failed');
-  return { handled: true, reversed: true };
+// Polls the provider directly instead of waiting for a webhook — the
+// recovery path for exactly the case a webhook can't cover: it never
+// arrived (a NIBSS outage, a dropped delivery). See reconciliationService.js
+// for what calls this and on what schedule.
+async function reconcileOutboundAttempt(attempt) {
+  const { provider } = await tenantConfigService.getProviderForTenant(attempt.tenantId);
+  let outcome;
+  try {
+    outcome = await provider.getTransferStatus(attempt.providerRef);
+  } catch (err) {
+    logger.error(`[Reconciliation] getTransferStatus failed for attempt ${attempt.id}: ${err.message}`);
+    return { action: 'skipped', reason: err.message };
+  }
+  return applyOutboundOutcome(attempt.tenantId, attempt, outcome);
+}
+
+// The auto-refund SLA made real: an attempt that's stayed unresolved past
+// the configured window gets reversed regardless of what the provider
+// says (or doesn't say) — the customer isn't left waiting indefinitely
+// for an outage to resolve itself.
+async function autoRefundStaleAttempt(attempt, reason) {
+  await reverseAndFail(attempt.tenantId, attempt, reason);
+  return { action: 'auto-refunded' };
 }
 
 async function reverseAndFail(tenantId, attempt, reason) {
@@ -158,4 +199,4 @@ function markFailed(attemptId, reason) {
   });
 }
 
-module.exports = { resolveInboundWebhook, initiatePayout };
+module.exports = { resolveInboundWebhook, initiatePayout, reconcileOutboundAttempt, autoRefundStaleAttempt };

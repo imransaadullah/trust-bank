@@ -33,6 +33,10 @@ const { ProviderNotImplementedError } = require('../utils/errors');
  * @typedef {Object} OutboundResult
  * @property {string} providerRef
  * @property {'processing'|'completed'|'failed'} status
+ *
+ * @typedef {Object} TransferStatus
+ * @property {'processing'|'completed'|'failed'} status
+ * @property {string} [failureReason]
  */
 class PaymentsProvider {
   constructor(name) {
@@ -62,6 +66,15 @@ class PaymentsProvider {
   /** @returns {Promise<Array<{code: string, name: string}>>} */
   async getBankList() {
     throw new ProviderNotImplementedError(this.name, 'getBankList');
+  }
+
+  /**
+   * Poll the provider for an outbound transfer's current status — the
+   * reconciliation path for when a webhook never arrives (the NIBSS-outage
+   * case). @returns {Promise<TransferStatus>}
+   */
+  async getTransferStatus(_reference) {
+    throw new ProviderNotImplementedError(this.name, 'getTransferStatus');
   }
 
   /** Verify a webhook's signature over the raw request body. Must not throw — return false on failure. */

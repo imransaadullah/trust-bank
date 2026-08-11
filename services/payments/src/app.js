@@ -10,6 +10,7 @@ const accountsRoutes = require('./routes/accounts');
 const identityRoutes = require('./routes/identity');
 const payoutsRoutes = require('./routes/payouts');
 const webhooksRoutes = require('./routes/webhooks');
+const reconciliationRoutes = require('./routes/reconciliation');
 
 function createApp() {
   const app = express();
@@ -29,6 +30,7 @@ function createApp() {
   app.use('/v1/tenants', requireSharedSecret, accountsRoutes);
   app.use('/v1/tenants', requireSharedSecret, identityRoutes);
   app.use('/v1/tenants', requireSharedSecret, payoutsRoutes);
+  app.use('/v1/tenants', requireSharedSecret, reconciliationRoutes);
 
   app.use(errorHandler);
 

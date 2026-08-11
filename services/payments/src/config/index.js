@@ -17,4 +17,11 @@ module.exports = {
     baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080',
     sharedSecret: required('LEDGER_SHARED_SECRET'),
   },
+  reconciliation: {
+    // Operational tuning, not regulatory policy — doesn't go through
+    // services/compliance's versioned-policy machinery.
+    pollIntervalMinutes: parseInt(process.env.RECONCILIATION_POLL_INTERVAL_MINUTES || '5', 10),
+    staleMinutes: parseInt(process.env.RECONCILIATION_STALE_MINUTES || '15', 10),
+    autoRefundMinutes: parseInt(process.env.RECONCILIATION_AUTO_REFUND_MINUTES || '60', 10),
+  },
 };
