@@ -1,0 +1,84 @@
+// The bills equivalent of settlementService.js's initiatePayout/
+// reverseAndFail — deliberately a parallel implementation, not a shared
+// import. See BillPaymentAttempt's comment in schema.prisma: reusing
+// SettlementAttempt (and settlementService's private reverseAndFail,
+// which is typed against it) would pull in a real foreign key to
+// TenantProviderConfig, forcing any bills-only tenant to also configure
+// a payment rail just to pay a bill.
+const prisma = require('../db/prismaClient');
+const billsConfigService = require('./billsConfigService');
+const ledgerClient = require('./ledgerClient');
+const logger = require('../utils/logger');
+
+async function getBillers(tenantId, type) {
+  const { provider } = await billsConfigService.getProviderForTenant(tenantId);
+  return provider.getBillers(type);
+}
+
+async function verifyBillCustomer(tenantId, { billerCode, customerId }) {
+  const { provider } = await billsConfigService.getProviderForTenant(tenantId);
+  return provider.verifyBillCustomer(billerCode, customerId);
+}
+
+async function purchaseBill(tenantId, input) {
+  const { provider } = await billsConfigService.getProviderForTenant(tenantId);
+
+  const existing = await findAttempt(tenantId, provider.name, input.reference);
+  if (existing) {
+    return existing;
+  }
+
+  const attempt = await prisma.billPaymentAttempt.create({
+    data: {
+      tenantId, provider: provider.name, providerRef: input.reference,
+      externalCustomerId: input.externalCustomerId, billerCode: input.billerCode,
+      customerId: input.customerId, amount: input.amount, status: 'pending',
+      journalEntryId: input.debitJournalEntryId,
+    },
+  });
+
+  let result;
+  try {
+    result = await provider.purchaseBill({
+      billerCode: input.billerCode, customerId: input.customerId, amount: input.amount,
+      planCode: input.planCode, trackingReference: input.reference,
+      customerName: input.customerName, phone: input.phone,
+    });
+  } catch (err) {
+    await reverseAndFail(tenantId, attempt, err.message);
+    throw err;
+  }
+
+  if (result.success && result.status === 'completed') {
+    await prisma.billPaymentAttempt.update({
+      where: { id: attempt.id }, data: { status: 'resolved', resolvedAt: new Date() },
+    });
+  } else {
+    await reverseAndFail(tenantId, attempt, result.message || 'Provider bill payment failed');
+  }
+
+  return prisma.billPaymentAttempt.findUnique({ where: { id: attempt.id } });
+}
+
+async function reverseAndFail(tenantId, attempt, reason) {
+  if (attempt.journalEntryId) {
+    try {
+      await ledgerClient.reverseJournalEntry(tenantId, attempt.journalEntryId, {
+        reason, idempotencyKey: `${tenantId}:bill-reverse:${attempt.providerRef}`,
+      });
+    } catch (err) {
+      logger.error(`[Bills] Failed to reverse journal entry ${attempt.journalEntryId}: ${err.message}`);
+    }
+  }
+  await prisma.billPaymentAttempt.update({
+    where: { id: attempt.id }, data: { status: 'failed', failureReason: reason, resolvedAt: new Date() },
+  });
+}
+
+function findAttempt(tenantId, provider, providerRef) {
+  return prisma.billPaymentAttempt.findUnique({
+    where: { tenantId_provider_providerRef: { tenantId, provider, providerRef } },
+  });
+}
+
+module.exports = { getBillers, verifyBillCustomer, purchaseBill };

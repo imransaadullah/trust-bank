@@ -51,6 +51,22 @@ class PaymentsClient {
       beneficiaryName, reference, debitJournalEntryId, description,
     });
   }
+
+  getBillers(type) {
+    const query = type ? `?type=${encodeURIComponent(type)}` : '';
+    return this._request('GET', `/v1/tenants/${this.tenantId}/bills/billers${query}`);
+  }
+
+  verifyBillCustomer({ billerCode, customerId }) {
+    return this._request('POST', `/v1/tenants/${this.tenantId}/bills/verify`, { billerCode, customerId });
+  }
+
+  purchaseBill({ externalCustomerId, billerCode, customerId, amount, planCode, customerName, phone, reference, debitJournalEntryId }) {
+    return this._request('POST', `/v1/tenants/${this.tenantId}/bills/purchase`, {
+      externalCustomerId, billerCode, customerId, amount, planCode,
+      customerName, phone, reference, debitJournalEntryId,
+    });
+  }
 }
 
 module.exports = new PaymentsClient();

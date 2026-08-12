@@ -110,3 +110,58 @@ model ApiCredential {
   @@index([status])
   @@map("api_credentials")
 }
+
+// ============================================
+// TENANT BILLS PROVIDER CONFIG
+// Sibling to TenantProviderConfig, deliberately not merged into it — that
+// table is @unique on tenantId alone (one payment-rail config per
+// tenant, full stop), so a tenant can independently configure a bills
+// provider (Kuda, VTpass, or none) without it ever touching, or being
+// touched by, their payment-rail choice. No tenantSlug — no inbound
+// bills-webhook routing is built yet, so there's nothing to route by
+// slug (see src/providers/billsProvider.js).
+// ============================================
+model TenantBillsProviderConfig {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique @map("tenant_id")
+  provider             String   // 'kuda' | 'vtpass'
+  status               String   @default("active") // 'active' | 'inactive'
+  encryptedCredentials String   @map("encrypted_credentials")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([provider])
+  @@map("tenant_bills_provider_configs")
+}
+
+// ============================================
+// BILL PAYMENT ATTEMPTS
+// The bills equivalent of SettlementAttempt — deliberately a separate
+// table, not a reuse of SettlementAttempt, because that model has a real
+// foreign key to TenantProviderConfig (via tenantId). Reusing it would
+// silently force any bills-only tenant (no payment rail configured) to
+// also configure one just to pay a bill — exactly the kind of forced
+// coupling this feature exists to avoid. tenantId here is a plain
+// string, not a Prisma relation, same convention TenantProviderConfig
+// itself uses for referencing the Ledger's tenant id.
+// ============================================
+model BillPaymentAttempt {
+  id                 String    @id @default(uuid())
+  tenantId           String    @map("tenant_id")
+  provider           String
+  providerRef        String    @map("provider_ref")
+  externalCustomerId String    @map("external_customer_id")
+  billerCode         String    @map("biller_code")
+  customerId         String    @map("customer_id") // the biller-side identifier (meter/smartcard/phone number)
+  amount             Int       // minor units (kobo)
+  status             String    @default("pending") // 'pending' | 'resolved' | 'failed'
+  journalEntryId     String?   @map("journal_entry_id")
+  failureReason      String?   @map("failure_reason")
+  rawPayload         Json?     @map("raw_payload")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  resolvedAt         DateTime? @map("resolved_at")
+
+  @@unique([tenantId, provider, providerRef])
+  @@index([tenantId, status])
+  @@map("bill_payment_attempts")
+}

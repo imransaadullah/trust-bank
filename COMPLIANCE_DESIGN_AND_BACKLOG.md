@@ -74,7 +74,7 @@ Every gap/edge from `TRUSTPAY_MARKET_STRATEGY.md`, given a home. "Home" means wh
 
 | Item | Touches | Phase | Note |
 |---|---|---|---|
-| Bills/airtime/data/electricity/cable | New provider capability in `services/payments`, new routes in `trustpay-backend` | **Phase 2-adjacent** (BaaS/API layer gaining a capability) but product-facing | Old `core-banking/` already has a working Paystack/Kuda bills integration to reference — see its `routes/bills.js`. |
+| Bills/airtime/data/electricity/cable | `services/payments` (new `billsProvider`/`billsRegistry`/`billsConfigService`/`billsService`), new `/bills/*` routes in `trustpay-backend` | **Done** | Was blocked on "un-defer Kuda or pick another aggregator" — resolved by rejecting that premise: a pluggable bills-provider abstraction, independent of the payment-rail choice, so no biller is hardcoded. Kuda implemented (ported from old `core-banking/routes/bills.js` + `providers/kudaProvider.js`, a real prior integration), VTpass stubbed to prove the contract generalizes. Verified live: debit-then-reverse-on-failure against a genuine Kuda 401 (fake credentials, really rejected), compliance-gated the same as withdrawal. No reconciliation for bill purchases yet (same gap as inbound settlement) — see `services/payments`' README. |
 
 ### Segment D — Consumer Parity: Savings & Credit (`services/ledger` + `trustpay-backend`)
 

@@ -11,6 +11,15 @@ Multi-tenant from day one — own Postgres DB, tenant identity referenced
 from (not duplicated from) the Ledger's `tenants` table, provider
 credentials encrypted at rest (`src/crypto/tenantSecrets.js`, AES-256-GCM).
 
+Also owns bills (airtime/data/electricity/cable) behind its own
+independent provider abstraction (`src/providers/billsProvider.js`) —
+Kuda implemented (ported from `truechat/core-banking`'s working
+integration), a VTpass stub proving the contract generalizes. A tenant's
+choice of bills aggregator and its choice of payment rail are
+independent — TrustPay might configure Kuda for bills; a different
+tenant might configure something else, or nothing. No biller is
+hardcoded anywhere outside `billsRegistry.js`.
+
 ## What's real vs. what's a placeholder
 
 **Real, and verified against a live Ledger + a real (though fake-keyed)
@@ -52,6 +61,18 @@ Paystack HTTP round trip:**
   configures a tenant's rail and issues `operate` credentials; a
   tenant-A credential is rejected with 403 when a request's `:tenantId`
   claims tenant B; a revoked credential is rejected on its very next call.
+- **Bills** (`src/services/billsService.js`): the same debit-then-call-
+  provider-then-reverse-on-failure pattern as payouts, verified live
+  against a real Kuda token-endpoint rejection (fake credentials,
+  genuinely rejected with a real 401 — not simulated). A `BillPaymentAttempt`
+  row was created `pending`, correctly transitioned to `failed` with the
+  real failure reason, the Ledger debit was reversed, and the customer's
+  balance was confirmed restored exactly. Deliberately a separate audit
+  table from `SettlementAttempt`/payouts — see `BillPaymentAttempt`'s
+  comment in `schema.prisma` for why reusing it would have forced any
+  bills-only tenant to also configure a payment rail. Also verified: a
+  tenant with *only* a bills config (no `TenantProviderConfig` row at
+  all) works fine — the whole point of keeping the two tables separate.
 
 **Not verified — needs live Paystack credentials this environment doesn't
 have:** `provisionAccount` actually creating a Paystack DVA, `verifyIdentity`
@@ -64,13 +85,24 @@ of these is the same one exercised (successfully) elsewhere — only the
 **Scoped out of reconciliation, deliberately:** inbound (a deposit that
 never arrives) has no comparable "ask the provider what happened" recovery
 path — if money never reached Paystack there's nothing to poll for. This
-pass covers outbound (withdrawal payouts) only.
+pass covers outbound (withdrawal payouts) only. **Bill purchases have no
+reconciliation either** — if a provider call times out after the debit
+already happened, there's no poll-for-status recovery path yet, the same
+gap as inbound settlement. A real gap, not assumed away.
 
 **Explicit placeholders:**
 - **No mTLS** — see the Ledger's README and `../../deploy/NETWORK_TOPOLOGY.md`;
   credential scoping is done, mTLS for a real hybrid deployment isn't.
 - **`selfIssuedNuban.js`** — interface only. NUBAN generation and a NIBSS
   switching-partner integration aren't built; nothing needs them yet.
+- **`vtpassBillsProvider.js`** — interface only, same role as
+  `selfIssuedNuban.js`: proves the bills contract isn't secretly
+  Kuda-shaped, nothing more.
+- **A *successful* bill purchase isn't verified** — this environment has
+  no live Kuda credentials. The request shape reaching Kuda's real API
+  and getting a real (auth) rejection is verified; whether a correctly-
+  authenticated purchase actually succeeds isn't, matching every other
+  provider integration's documented limitation in this repo.
 
 ## Setup
 
@@ -134,34 +166,62 @@ curl -X POST localhost:8081/v1/tenants/$TENANT_ID/payouts \
 # every RECONCILIATION_POLL_INTERVAL_MINUTES, this is for ops/testing.
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/reconcile \
   -H "Authorization: Bearer $OPERATE_TOKEN" -d '{}'
+
+# Bills — an entirely independent config from the payment rail above.
+# A tenant can configure this, the rail above, both, or neither.
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills-config \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"provider":"kuda","credentials":{"email":"ops@example.com","apiKey":"...","baseUrl":"https://kuda-openapi.kuda.com/v2"}}'
+
+curl "localhost:8081/v1/tenants/$TENANT_ID/bills/billers?type=airtime" \
+  -H "Authorization: Bearer $OPERATE_TOKEN"
+
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills/verify \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
+  -d '{"billerCode":"biller-1","customerId":"08010000000"}'
+
+# Same debit-first-on-the-Ledger-then-call pattern as payouts —
+# debitJournalEntryId lets a provider failure reverse automatically.
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills/purchase \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
+  -d '{"externalCustomerId":"user-123","billerCode":"biller-1","customerId":"08010000000","amount":50000,"reference":"BILL-1","debitJournalEntryId":"<ledger-journal-entry-id>"}'
 ```
 
 ## Layout
 
 ```
-prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt, ApiCredential
+prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt, ApiCredential,
+                       TenantBillsProviderConfig, BillPaymentAttempt
 scripts/bootstrapKey.js  issues the first admin credential for a fresh tenant
-src/providers/         the contract (provider.js) + paystack.js + selfIssuedNuban.js (stub)
-src/crypto/            tenant credential encryption at rest
+src/providers/         payment rails: provider.js (contract) + paystack.js + selfIssuedNuban.js (stub)
+                       bills: billsProvider.js (contract) + kudaBillsProvider.js + vtpassBillsProvider.js (stub)
+                       billsRegistry.js — bills-specific, separate from registry.js
+src/crypto/            tenant credential encryption at rest — shared by both config services
 src/services/          tenantConfigService, accountProvisioningService, settlementService,
-                       reconciliationService, reconciliationRunner, ledgerClient, credentialService
-src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation, credentials
+                       reconciliationService, reconciliationRunner, ledgerClient, credentialService,
+                       billsConfigService, billsService
+src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation,
+                       credentials, billsConfig, bills
 ```
 
 ## Testing
 
-`tests/paystackProvider.test.js` and `tests/providerConformance.test.js`
-need no live credentials or database — pure unit tests against fixtures.
-`tests/tenantSecrets.test.js` covers the encryption round trip.
-`tests/reconciliation.test.js` covers `reconcileOutboundAttempt`'s four
-branches (resolved / reversed / still-pending / provider-call-failed) and
-`autoRefundStaleAttempt`, against a real Postgres with the provider's
+`tests/paystackProvider.test.js`, `tests/providerConformance.test.js`,
+`tests/kudaBillsProvider.test.js`, and `tests/billsProviderConformance.test.js`
+need no live credentials or database — pure unit tests against fixtures/
+mocked axios calls. `tests/tenantSecrets.test.js` covers the encryption
+round trip. `tests/reconciliation.test.js` covers `reconcileOutboundAttempt`'s
+four branches (resolved / reversed / still-pending / provider-call-failed)
+and `autoRefundStaleAttempt`, against a real Postgres with the provider's
 network call faked via `jest.spyOn` — same "real DB, faked external
 network" style as the rest of this repo's tests. `tests/credentialService.test.js`
 and `tests/authMiddleware.test.js` cover credential issuing/verification/
 revocation and, specifically, the tenant-spoofing regression (a
 credential bound to tenant A being rejected when a request's `:tenantId`
-claims tenant B). The inbound settlement flow and the reconciliation
-orchestration's age-threshold branching were verified manually end-to-end
-against a live Ledger during development (see the "what's real" section
-above) — not yet captured as automated integration tests in this repo.
+claims tenant B). `tests/billsConfigService.test.js` covers bills config
+set/get and, specifically, that a bills-only tenant (no payment-rail
+config row) works. The inbound settlement flow, reconciliation's
+age-threshold branching, and the bills debit/reverse-on-failure flow
+(a genuine Kuda 401) were verified manually end-to-end against a live
+Ledger during development (see the "what's real" section above) — not
+yet captured as automated integration tests in this repo.

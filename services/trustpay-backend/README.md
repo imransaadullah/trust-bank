@@ -52,14 +52,25 @@ instances during development:**
   `../../SERVICE_CREDENTIAL_MODEL.md`. Verified as part of the full
   4-service rebuild: every flow above still worked end-to-end with zero
   shared secrets anywhere in the stack.
+- Bills (`/bills/pay`), through `enforceCompliance` — the same shared
+  helper (`src/services/complianceEnforcement.js`, extracted out of
+  `wallet.js` so both routes go through identical checks) `/wallet/
+  withdraw` uses. Verified live: a Tier-0 user is blocked the same way a
+  Tier-0 withdrawal is blocked; a Tier-1 user's payment debits the
+  wallet, genuinely fails against fake Kuda credentials (a real 401 from
+  Kuda's actual token endpoint), and the debit is confirmed reversed —
+  the customer's balance restored exactly, the local `Transaction` row
+  correctly `status: 'reversed'`. The existing withdrawal/P2P/savings
+  flows were re-verified unchanged after `enforceCompliance` moved out
+  of `wallet.js`.
 
 **Not verified — needs live credentials this environment doesn't have:**
 `/auth/send-otp` and `/auth/verify-otp` against a real AuthCore OTP
 (the account-creation and wallet-opening code downstream of a successful
 verification *was* exercised, just seeded directly rather than reached
 via a real OTP round trip), and a *successful* KYC verify/DVA
-provisioning/payout (their failure paths were exercised for real instead —
-see `services/payments`' README for what that proved).
+provisioning/payout/bill-purchase (their failure paths were exercised for
+real instead — see `services/payments`' README for what that proved).
 
 **Explicit placeholders:**
 - No retry route for a user whose signup succeeded but wallet-opening
@@ -114,17 +125,26 @@ curl -X POST localhost:8082/savings -H "Authorization: Bearer $TOKEN" \
 curl -X POST localhost:8082/savings/$SAVINGS_ACCOUNT_ID/withdraw -H "Authorization: Bearer $TOKEN" \
   -d '{"amount":50000}'
 curl localhost:8082/savings -H "Authorization: Bearer $TOKEN"
+
+curl localhost:8082/bills/billers?type=airtime -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8082/bills/verify -H "Authorization: Bearer $TOKEN" \
+  -d '{"billerCode":"biller-1","customerId":"08010000000"}'
+# requires kycTier >= 1, goes through enforceCompliance same as withdraw
+curl -X POST localhost:8082/bills/pay -H "Authorization: Bearer $TOKEN" \
+  -d '{"billerCode":"biller-1","customerId":"08010000000","amount":50000,"customerName":"Ada Lovelace"}'
 ```
 
 ## Layout
 
 ```
 prisma/               User, Device, Transaction (local statement cache — the
-                       Ledger has no list-entries endpoint yet)
+                       Ledger has no list-entries endpoint yet; metadata Json?
+                       holds bill_payment-specific fields like billerCode)
 src/services/          authCoreClient, authTokenVerifier (lifted from
                        truechat/backend, JWKS-only), ledgerClient, paymentsClient,
-                       complianceClient
-src/routes/            auth, kyc, wallet, savings
+                       complianceClient, complianceEnforcement (enforceCompliance,
+                       shared by wallet.js and bills.js)
+src/routes/            auth, kyc, wallet, savings, bills
 src/middleware/auth.js  verifies this backend's own JWT (not AuthCore's, not
                        the Ledger's/Payments'/Compliance's operate credentials)
                        and attaches the device claim minted at login

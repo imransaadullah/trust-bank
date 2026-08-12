@@ -74,13 +74,20 @@ model Device {
 model Transaction {
   id                 String   @id @default(uuid())
   userId             String   @map("user_id")
-  type               String // 'deposit' | 'p2p_sent' | 'p2p_received' | 'withdrawal'
+  type               String // 'deposit' | 'p2p_sent' | 'p2p_received' | 'withdrawal' | 'bill_payment'
   amount             Int // minor units (kobo)
   counterpartyUserId String?  @map("counterparty_user_id")
   counterpartyLabel  String?  @map("counterparty_label")
   journalEntryId     String   @map("journal_entry_id")
   status             String   @default("completed") // completed | failed | reversed
   description        String?
+  // Biller-specific fields (billerCode/customerId/planCode) for a
+  // bill_payment row — nullable, only bill_payment rows populate it.
+  // Everything else keeps using named columns; this exists because
+  // biller-required fields genuinely vary by biller type (meter number
+  // vs. smartcard number vs. phone number), not as a general-purpose
+  // catch-all.
+  metadata           Json?
   createdAt          DateTime @default(now()) @map("created_at")
 
   user User @relation(fields: [userId], references: [id])
