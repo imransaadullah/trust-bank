@@ -1,9 +1,10 @@
 const express = require('express');
 const tenantConfigService = require('../services/tenantConfigService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/identity/verify', async (req, res, next) => {
+router.post('/:tenantId/identity/verify', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { type, number, firstName, lastName } = req.body;
     if (!['bvn', 'nin'].includes(type) || !number || !firstName || !lastName) {

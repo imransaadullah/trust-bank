@@ -1,10 +1,11 @@
 const express = require('express');
 const monitoringPolicyService = require('../services/monitoringPolicyService');
 const screeningService = require('../services/screeningService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/compliance/monitoring-policy', async (req, res, next) => {
+router.post('/:tenantId/compliance/monitoring-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const {
       jurisdiction, velocityWindowHours, velocityMaxTransactionCount,
@@ -33,7 +34,7 @@ router.post('/:tenantId/compliance/monitoring-policy', async (req, res, next) =>
   }
 });
 
-router.post('/:tenantId/compliance/screen-transaction', async (req, res, next) => {
+router.post('/:tenantId/compliance/screen-transaction', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { jurisdiction, userId, amount, counterpartyId, recentTransactions, transactionRef } = req.body;
     if (!userId || amount == null) {
@@ -49,7 +50,7 @@ router.post('/:tenantId/compliance/screen-transaction', async (req, res, next) =
   }
 });
 
-router.post('/:tenantId/compliance/screen-sanctions', async (req, res, next) => {
+router.post('/:tenantId/compliance/screen-sanctions', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { userId, fullName } = req.body;
     if (!userId || !fullName) {
@@ -64,7 +65,7 @@ router.post('/:tenantId/compliance/screen-sanctions', async (req, res, next) => 
   }
 });
 
-router.get('/:tenantId/compliance/cases', async (req, res, next) => {
+router.get('/:tenantId/compliance/cases', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { status, caseType } = req.query;
     const cases = await screeningService.listCases({ tenantId: req.params.tenantId, status, caseType });
@@ -74,7 +75,7 @@ router.get('/:tenantId/compliance/cases', async (req, res, next) => {
   }
 });
 
-router.post('/:tenantId/compliance/cases/:caseId/review', async (req, res, next) => {
+router.post('/:tenantId/compliance/cases/:caseId/review', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { status, reviewedBy, reviewNotes } = req.body;
     if (!status) {

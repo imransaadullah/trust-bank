@@ -35,7 +35,7 @@ func main() {
 	go outbox.NewConsumer(pool).Run(ctx)
 	go accrual.NewConsumer(pool, cfg.AccrualPollInterval).Run(ctx)
 
-	handler := httpapi.NewServer(pool, cfg.SharedSecret)
+	handler := httpapi.NewServer(pool)
 	server := &http.Server{Addr: cfg.BindHost + ":" + cfg.Port, Handler: handler}
 
 	go func() {

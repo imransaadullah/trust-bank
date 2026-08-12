@@ -1,9 +1,10 @@
 const express = require('express');
 const settlementService = require('../services/settlementService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/payouts', async (req, res, next) => {
+router.post('/:tenantId/payouts', requireApiKey('operate'), async (req, res, next) => {
   try {
     const {
       externalCustomerId, amount, beneficiaryAccountNumber, beneficiaryBankCode,

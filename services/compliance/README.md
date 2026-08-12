@@ -75,6 +75,12 @@ trustpay-backend chain:**
 - `reviewCase` updates `status`/`reviewedBy`/`reviewNotes`/`reviewedAt`
   correctly; a review against an unknown case id returns
   `CASE_NOT_FOUND`.
+- Scoped, revocable, tenant-bound credentials (`src/services/credentialService.js`)
+  replace the old single shared secret — see `../../SERVICE_CREDENTIAL_MODEL.md`.
+  Verified live as part of the full 4-service rebuild: policy-publish
+  routes require `admin`, decision/screening routes accept `operate`,
+  and a tenant-A credential is rejected with 403 when a request's
+  `:tenantId` claims tenant B.
 
 **Two honest limitations, not glossed over:**
 - **The sanctions watchlist is seed data (`prisma/seed.js`), not a live
@@ -92,10 +98,11 @@ trustpay-backend chain:**
   name to screen against yet. Worth fixing before this matters for real,
   not assumed away.
 
-**Explicit placeholder:** shared-secret auth, same caveat as the Ledger's
-and Payments'. The `cases` review routes have no access control beyond
-that same shared secret — there's no admin/back-office auth model
-anywhere in the platform yet, a known gap, not a new one introduced here.
+**Explicit placeholder:** no mTLS — see the Ledger's README and
+`../../deploy/NETWORK_TOPOLOGY.md`. The `cases` review routes require an
+`operate` credential like every other decision route — there's no
+separate admin/back-office auth model anywhere in the platform yet, a
+known gap, not a new one introduced here.
 
 ## Setup
 
@@ -109,56 +116,70 @@ npx prisma migrate deploy
 npm install
 npm test          # policy versioning + decision math + screening, needs DATABASE_URL
 npm run prisma:seed   # loads synthetic sanctions-watchlist test entries — see prisma/seed.js
+
+# Bootstrap the first (admin) credential for a tenant — see
+# ../../SERVICE_CREDENTIAL_MODEL.md. tenantId must already exist on the Ledger.
+node scripts/bootstrapKey.js --tenant-id $TENANT_ID --scope admin --label ops-bootstrap
+
 npm run dev       # :8083
 ```
 
 ## API
 
 ```bash
-# Publish a KYC-tier policy (a new version, never overwrites).
+# Publish a KYC-tier policy (a new version, never overwrites) — requires admin.
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/kyc-policy \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"tier":1,"requiredVerifications":["bvn_or_nin"],"dailyLimitKobo":3000000,"singleTxnLimitKobo":3000000}'
 
-# Publish a device-binding policy.
+# Publish a device-binding policy — admin.
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/device-policy \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"newDeviceCooldownHours":24,"newDeviceLimitKobo":2000000}'
+
+# Publish a transaction-monitoring policy — admin.
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/monitoring-policy \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"velocityWindowHours":24,"velocityMaxTransactionCount":10,"velocityMaxDistinctCounterparties":10,"structuringThresholdKobo":50000000,"structuringWindowCount":3,"largeSingleTxnThresholdKobo":500000000}'
+
+# Issue an operate-scope credential for a real caller (e.g. trustpay-backend).
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/credentials \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"label":"trustpay-backend","scope":"operate"}'
+# -> { id, label, scope, tokenPrefix, token } — token is shown once
+
+# Everything below uses that operate token.
+OPERATE_TOKEN=...
 
 # Ask: is this transaction allowed under the caller's current KYC tier?
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/kyc-tier-check \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"userId":"user-123","tier":1,"amount":1000000,"amountTransactedTodayKobo":2500000}'
 # -> { allowed, reason?, dailyLimitKobo, singleTxnLimitKobo, policyVersion }
 
 # Ask: does this device need a cap right now?
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/device-check \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"userId":"user-123","isNewDevice":true,"amount":2500000}'
 # -> { allowed, capAppliedKobo?, cooldownHours?, reason?, policyVersion }
 
-# Publish a transaction-monitoring policy.
-curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/monitoring-policy \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
-  -d '{"velocityWindowHours":24,"velocityMaxTransactionCount":10,"velocityMaxDistinctCounterparties":10,"structuringThresholdKobo":50000000,"structuringWindowCount":3,"largeSingleTxnThresholdKobo":500000000}'
-
 # Screen a transaction — never blocks, flags into a ComplianceCase.
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/screen-transaction \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"userId":"user-123","amount":500000,"counterpartyId":"user-456","recentTransactions":[{"amount":500000,"counterpartyId":"user-456","createdAt":"2026-08-11T10:00:00Z"}]}'
 # -> { flagged, riskLevel, matchedRules, policyVersion }
 
 # Screen a name against the watchlist — a hit is meant to block the caller's transaction.
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/screen-sanctions \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"userId":"user-123","fullName":"Ada Lovelace"}'
 # -> { hit, matchedEntries }
 
 # Review queue.
 curl localhost:8083/v1/tenants/$TENANT_ID/compliance/cases?status=open \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET"
+  -H "Authorization: Bearer $OPERATE_TOKEN"
 curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/cases/$CASE_ID/review \
-  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"status":"dismissed","reviewedBy":"ops@trustpay.example","reviewNotes":"False positive."}'
 ```
 
@@ -172,15 +193,18 @@ prisma/               KYCTierPolicy, DeviceBindingPolicy, TransactionMonitoringP
                        tenant-scoped), ComplianceCase — the service's first persisted
                        state beyond policy, an audit trail, not per-user decision input.
 prisma/seed.js         synthetic sanctions-watchlist test entries — not a live feed
+scripts/bootstrapKey.js  issues the first admin credential for a fresh tenant
 src/services/
   policyService.js             KYC-tier + device-binding: publish + "current effective" lookup
   monitoringPolicyService.js    same pattern, for TransactionMonitoringPolicy
   decisionService.js            pure policy math over caller-supplied facts (KYC-tier, device)
   screeningService.js           screenTransaction (flags), screenSanctions (blocks),
                                  listCases/reviewCase — rule-based, ML-ready contract
+  credentialService.js          scoped/revocable API credentials — see ../../SERVICE_CREDENTIAL_MODEL.md
 src/routes/
   policies.js            admin: publish a KYC-tier or device policy version
-  decisions.js            the two KYC-tier/device decision endpoints
-  monitoring.js           monitoring-policy publish, screen-transaction,
+  decisions.js            operate: the two KYC-tier/device decision endpoints
+  monitoring.js           admin: monitoring-policy publish. operate: screen-transaction,
                            screen-sanctions, cases list/review
+  credentials.js          admin: issue/list/revoke this tenant's own credentials
 ```

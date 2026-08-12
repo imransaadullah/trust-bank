@@ -31,16 +31,19 @@ module.exports = {
     jwksUrl: process.env.AUTHCORE_JWKS_URL,
     projectId: process.env.AUTHCORE_PROJECT_ID,
   },
+  // Operate-scope credentials for each upstream service, issued via that
+  // service's cmd/bootstrap-key or POST /v1/tenants/:id/credentials — see
+  // SERVICE_CREDENTIAL_MODEL.md (repo root). No longer shared secrets.
   ledger: {
     baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080',
-    sharedSecret: required('LEDGER_SHARED_SECRET'),
+    apiKey: required('LEDGER_API_KEY'),
   },
   payments: {
     baseUrl: process.env.PAYMENTS_SERVICE_URL || 'http://localhost:8081',
-    sharedSecret: required('PAYMENTS_SHARED_SECRET'),
+    apiKey: required('PAYMENTS_API_KEY'),
   },
   compliance: {
     baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083',
-    sharedSecret: required('COMPLIANCE_SHARED_SECRET'),
+    apiKey: required('COMPLIANCE_API_KEY'),
   },
 };

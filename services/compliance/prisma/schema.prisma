@@ -129,3 +129,27 @@ model ComplianceCase {
   @@index([tenantId, status, createdAt])
   @@map("compliance_cases")
 }
+
+// ============================================
+// API CREDENTIAL
+// Replaces the single static COMPLIANCE_SHARED_SECRET — see
+// SERVICE_CREDENTIAL_MODEL.md (repo root). Every credential is bound to
+// exactly one tenant — tenant identity lives only in the Ledger, this
+// service only ever acts on a tenantId that already exists there.
+// ============================================
+model ApiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  label       String
+  tokenPrefix String    @unique @map("token_prefix")
+  hashedToken String    @map("hashed_token")
+  scope       String // 'admin' | 'operate'
+  status      String    @default("active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("api_credentials")
+}

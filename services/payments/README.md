@@ -45,6 +45,13 @@ Paystack HTTP round trip:**
   correctly left untouched in the same run. The existing webhook-driven
   resolution path (`handleOutboundOutcome`) was re-verified unchanged
   after being refactored to share logic with the new poll path.
+- Scoped, revocable, tenant-bound credentials (`src/services/credentialService.js`)
+  replace the old single shared secret — see `../../SERVICE_CREDENTIAL_MODEL.md`.
+  Verified live end to end, rebuilding the whole 4-service stack from
+  scratch with no shared secret anywhere: an `admin` credential
+  configures a tenant's rail and issues `operate` credentials; a
+  tenant-A credential is rejected with 403 when a request's `:tenantId`
+  claims tenant B; a revoked credential is rejected on its very next call.
 
 **Not verified — needs live Paystack credentials this environment doesn't
 have:** `provisionAccount` actually creating a Paystack DVA, `verifyIdentity`
@@ -60,9 +67,8 @@ path — if money never reached Paystack there's nothing to poll for. This
 pass covers outbound (withdrawal payouts) only.
 
 **Explicit placeholders:**
-- **Auth** (`src/middleware/auth.js`) — shared secret, same caveat as the
-  Ledger's. Two real callers now (TrustPay's backend, and this service's
-  own tenant-config bootstrap step) — worth tiering before a third shows up.
+- **No mTLS** — see the Ledger's README and `../../deploy/NETWORK_TOPOLOGY.md`;
+  credential scoping is done, mTLS for a real hybrid deployment isn't.
 - **`selfIssuedNuban.js`** — interface only. NUBAN generation and a NIBSS
   switching-partner integration aren't built; nothing needs them yet.
 
@@ -76,54 +82,70 @@ export DATABASE_URL=postgresql://postgres:password@localhost:5432/trustbank_paym
 npx prisma migrate deploy
 
 npm install
+
+# Bootstrap the first (admin) credential for a tenant — see
+# ../../SERVICE_CREDENTIAL_MODEL.md. tenantId must already exist on the
+# Ledger (POST /v1/tenants there first).
+node scripts/bootstrapKey.js --tenant-id $TENANT_ID --scope admin --label ops-bootstrap
+
 npm run dev   # :8081, requires the Ledger service already running
 ```
 
 ## API
 
 ```bash
-# Register this tenant's rail — tenantId must already exist on the Ledger
-# (POST /v1/tenants there first).
+# Register this tenant's rail, using the admin credential from bootstrap.
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/config \
-  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
   -d '{"tenantSlug":"trustpay","provider":"paystack","credentials":{"secretKey":"sk_live_...","webhookSecret":"whsec_..."}}'
+
+# Issue an operate-scope credential for a real caller (e.g. trustpay-backend).
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/credentials \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -d '{"label":"trustpay-backend","scope":"operate"}'
+# -> { id, label, scope, tokenPrefix, token } — token is shown once
+
+# Everything below uses that operate token.
+OPERATE_TOKEN=...
 
 # Provision a customer's account (DVA for Paystack)
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/accounts \
-  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"externalCustomerId":"user-123","firstName":"Ada","lastName":"Lovelace","phoneNumber":"+2348010000000"}'
 
 # BVN/NIN check
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/identity/verify \
-  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"type":"bvn","number":"12345678901","firstName":"Ada","lastName":"Lovelace"}'
 
 # Payout — call only after the caller has already debited the customer
 # on the Ledger; pass that journal entry's id so a provider failure can
 # be reversed automatically.
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/payouts \
-  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"externalCustomerId":"user-123","amount":10000,"beneficiaryAccountNumber":"0123456789","beneficiaryBankCode":"058","reference":"WD-1","debitJournalEntryId":"<ledger-journal-entry-id>"}'
 
 # Webhook (Paystack calls this — tenantSlug in the path since a webhook
-# URL has no room for an authenticated lookup)
+# URL has no room for an authenticated lookup, and it's authenticated by
+# the provider's own signature instead)
 # POST /v1/webhooks/:tenantSlug/paystack
 
 # On-demand reconciliation — the background runner does this automatically
 # every RECONCILIATION_POLL_INTERVAL_MINUTES, this is for ops/testing.
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/reconcile \
-  -H "Authorization: Bearer $PAYMENTS_SHARED_SECRET" -d '{}'
+  -H "Authorization: Bearer $OPERATE_TOKEN" -d '{}'
 ```
 
 ## Layout
 
 ```
-prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt
+prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt, ApiCredential
+scripts/bootstrapKey.js  issues the first admin credential for a fresh tenant
 src/providers/         the contract (provider.js) + paystack.js + selfIssuedNuban.js (stub)
 src/crypto/            tenant credential encryption at rest
 src/services/          tenantConfigService, accountProvisioningService, settlementService,
-                       reconciliationService, reconciliationRunner, ledgerClient
-src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation
+                       reconciliationService, reconciliationRunner, ledgerClient, credentialService
+src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation, credentials
 ```
 
 ## Testing
@@ -135,8 +157,11 @@ need no live credentials or database — pure unit tests against fixtures.
 branches (resolved / reversed / still-pending / provider-call-failed) and
 `autoRefundStaleAttempt`, against a real Postgres with the provider's
 network call faked via `jest.spyOn` — same "real DB, faked external
-network" style as the rest of this repo's tests. The inbound settlement
-flow and the reconciliation orchestration's age-threshold branching were
-verified manually end-to-end against a live Ledger during development
-(see the "what's real" section above) — not yet captured as automated
-integration tests in this repo.
+network" style as the rest of this repo's tests. `tests/credentialService.test.js`
+and `tests/authMiddleware.test.js` cover credential issuing/verification/
+revocation and, specifically, the tenant-spoofing regression (a
+credential bound to tenant A being rejected when a request's `:tenantId`
+claims tenant B). The inbound settlement flow and the reconciliation
+orchestration's age-threshold branching were verified manually end-to-end
+against a live Ledger during development (see the "what's real" section
+above) — not yet captured as automated integration tests in this repo.

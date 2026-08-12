@@ -1,9 +1,10 @@
 const express = require('express');
 const policyService = require('../services/policyService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/compliance/kyc-policy', async (req, res, next) => {
+router.post('/:tenantId/compliance/kyc-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { jurisdiction, tier, requiredVerifications, dailyLimitKobo, singleTxnLimitKobo, effectiveFrom } = req.body;
     if (!tier || !requiredVerifications) {
@@ -19,7 +20,7 @@ router.post('/:tenantId/compliance/kyc-policy', async (req, res, next) => {
   }
 });
 
-router.post('/:tenantId/compliance/device-policy', async (req, res, next) => {
+router.post('/:tenantId/compliance/device-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { jurisdiction, maxActiveDevices, newDeviceCooldownHours, newDeviceLimitKobo, effectiveFrom } = req.body;
     if (newDeviceCooldownHours == null || newDeviceLimitKobo == null) {

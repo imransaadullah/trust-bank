@@ -19,4 +19,10 @@ class CaseNotFoundError extends ComplianceError {
   }
 }
 
-module.exports = { ComplianceError, NoPolicyConfiguredError, CaseNotFoundError };
+class CredentialNotFoundError extends ComplianceError {
+  constructor(credentialId) {
+    super(`No credential found with id ${credentialId}`, 'CREDENTIAL_NOT_FOUND', 404);
+  }
+}
+
+module.exports = { ComplianceError, NoPolicyConfiguredError, CaseNotFoundError, CredentialNotFoundError };

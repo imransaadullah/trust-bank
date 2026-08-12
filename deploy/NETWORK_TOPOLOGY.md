@@ -9,8 +9,10 @@ level, not left to a firewall rule someone has to remember to add.
 This holds across all three deployment models the platform needs to
 support, but it means something slightly different in each one — network
 position alone ("private subnet") stops being a sufficient control the
-moment a deployment splits across hosts, which is why the shared-secret
-auth on every service-to-service call stays regardless of topology.
+moment a deployment splits across hosts, which is why per-caller scoped
+credentials (`SERVICE_CREDENTIAL_MODEL.md`, repo root — replaced the old
+shared secrets) stay in effect on every service-to-service call
+regardless of topology.
 
 ## SaaS (all four services on infra we control)
 
@@ -38,6 +40,15 @@ cheap-to-operate choice for a small team; a cloud provider's VPC
 peering/VPN gateway works the same way if both halves are cloud-hosted)
 and set `BIND_HOST` on the split-off service to the tunnel interface's
 address instead of `127.0.0.1` — never `0.0.0.0`. Point the caller's
-`*_SERVICE_URL` env var at that tunnel address. The shared-secret auth on
+`*_SERVICE_URL` env var at that tunnel address. The scoped credential on
 every request is what keeps this safe even though the two halves are now
 talking over a real (if private) network rather than loopback.
+
+**Still open: mTLS.** Credential scoping (`SERVICE_CREDENTIAL_MODEL.md`)
+closed the "any caller can act as any tenant" gap and made every
+credential revocable, but a bearer token over a WireGuard tunnel is still
+just a bearer token — mTLS would add mutual, certificate-based caller
+identity on top. Not built yet: no real hybrid deployment exists to
+justify the ongoing PKI operational burden (issuance, rotation,
+revocation checking) before there's a reason to carry it. Build this when
+an actual hybrid deployment is on the table, not speculatively.

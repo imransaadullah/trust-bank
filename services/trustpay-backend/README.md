@@ -47,6 +47,11 @@ instances during development:**
   `internal/accrual` directly (`/savings` here is a thin pass-through —
   see `services/ledger`'s README for what was verified live: open/fund,
   lock enforcement, matured withdrawal, and the background interest job)
+- Every upstream call (Ledger, Payments, Compliance) now authenticates
+  with a real scoped `operate` credential, not a shared secret — see
+  `../../SERVICE_CREDENTIAL_MODEL.md`. Verified as part of the full
+  4-service rebuild: every flow above still worked end-to-end with zero
+  shared secrets anywhere in the stack.
 
 **Not verified — needs live credentials this environment doesn't have:**
 `/auth/send-otp` and `/auth/verify-otp` against a real AuthCore OTP
@@ -76,8 +81,10 @@ npx prisma migrate deploy
 
 npm install
 npm run dev   # :8082, requires the Ledger, Payments, and Compliance services
-              # already running, a tenant provisioned on all three (see their
-              # READMEs), and a KYC-tier + device-binding policy published on
+              # already running; a tenant provisioned on all three with
+              # operate-scope credentials issued for this backend (see
+              # ../../SERVICE_CREDENTIAL_MODEL.md and each service's README);
+              # and a KYC-tier + device-binding policy published on
               # Compliance before any wallet route will work
 ```
 
@@ -119,8 +126,8 @@ src/services/          authCoreClient, authTokenVerifier (lifted from
                        complianceClient
 src/routes/            auth, kyc, wallet, savings
 src/middleware/auth.js  verifies this backend's own JWT (not AuthCore's, not
-                       the Ledger's/Payments'/Compliance's shared secrets) and
-                       attaches the device claim minted at login
+                       the Ledger's/Payments'/Compliance's operate credentials)
+                       and attaches the device claim minted at login
 ```
 
 ## A bug worth knowing about if you're extending this

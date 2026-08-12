@@ -14,5 +14,4 @@ module.exports = {
   // Loopback only by default — never internet-facing. Override to a
   // private/VPN interface IP for a hybrid deployment; never 0.0.0.0.
   bindHost: process.env.BIND_HOST || '127.0.0.1',
-  sharedSecret: required('COMPLIANCE_SHARED_SECRET'),
 };

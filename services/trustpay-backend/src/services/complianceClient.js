@@ -8,7 +8,7 @@ const logger = require('../utils/logger');
 class ComplianceClient {
   constructor() {
     this.baseUrl = config.compliance.baseUrl;
-    this.sharedSecret = config.compliance.sharedSecret;
+    this.apiKey = config.compliance.apiKey;
     this.tenantId = config.tenantId;
   }
 
@@ -16,7 +16,7 @@ class ComplianceClient {
     try {
       const response = await axios({
         method, url: `${this.baseUrl}${path}`, data,
-        headers: { Authorization: `Bearer ${this.sharedSecret}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
         timeout: 10000,
       });
       return response.data.data;

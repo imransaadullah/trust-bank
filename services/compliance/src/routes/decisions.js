@@ -1,9 +1,10 @@
 const express = require('express');
 const decisionService = require('../services/decisionService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/compliance/kyc-tier-check', async (req, res, next) => {
+router.post('/:tenantId/compliance/kyc-tier-check', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { jurisdiction, userId, tier, amount, amountTransactedTodayKobo } = req.body;
     if (!userId || !tier || amount == null) {
@@ -19,7 +20,7 @@ router.post('/:tenantId/compliance/kyc-tier-check', async (req, res, next) => {
   }
 });
 
-router.post('/:tenantId/compliance/device-check', async (req, res, next) => {
+router.post('/:tenantId/compliance/device-check', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { jurisdiction, userId, isNewDevice, deviceAgeHours, amount } = req.body;
     if (!userId || amount == null) {

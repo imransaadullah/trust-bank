@@ -14,11 +14,13 @@ module.exports = {
   // Loopback only by default — never internet-facing. Override to a
   // private/VPN interface IP for a hybrid deployment; never 0.0.0.0.
   bindHost: process.env.BIND_HOST || '127.0.0.1',
-  sharedSecret: required('PAYMENTS_SHARED_SECRET'),
   encryptionKey: required('PAYMENTS_ENCRYPTION_KEY'),
   ledger: {
     baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080',
-    sharedSecret: required('LEDGER_SHARED_SECRET'),
+    // An operate-scope Ledger credential, issued via the Ledger's
+    // cmd/bootstrap-key or POST /v1/credentials — see
+    // SERVICE_CREDENTIAL_MODEL.md. No longer a shared secret.
+    apiKey: required('LEDGER_API_KEY'),
   },
   reconciliation: {
     // Operational tuning, not regulatory policy — doesn't go through

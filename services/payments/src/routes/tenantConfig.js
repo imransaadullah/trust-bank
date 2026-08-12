@@ -1,9 +1,10 @@
 const express = require('express');
 const tenantConfigService = require('../services/tenantConfigService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/config', async (req, res, next) => {
+router.post('/:tenantId/config', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { tenantSlug, provider, credentials } = req.body;
     if (!tenantSlug || !provider || !credentials) {
@@ -21,7 +22,7 @@ router.post('/:tenantId/config', async (req, res, next) => {
   }
 });
 
-router.get('/:tenantId/config', async (req, res, next) => {
+router.get('/:tenantId/config', requireApiKey('admin'), async (req, res, next) => {
   try {
     const config = await tenantConfigService.getConfigByTenantId(req.params.tenantId);
     res.json({

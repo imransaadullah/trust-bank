@@ -31,10 +31,17 @@ class InvalidProviderError extends PaymentsError {
   }
 }
 
+class CredentialNotFoundError extends PaymentsError {
+  constructor(credentialId) {
+    super(`No credential found with id ${credentialId}`, 'CREDENTIAL_NOT_FOUND', 404);
+  }
+}
+
 module.exports = {
   PaymentsError,
   TenantNotConfiguredError,
   ProviderNotImplementedError,
   WebhookVerificationError,
   InvalidProviderError,
+  CredentialNotFoundError,
 };

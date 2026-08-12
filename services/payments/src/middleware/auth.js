@@ -1,17 +1,38 @@
-// Placeholder auth — same shape and same caveat as the Ledger's
-// LEDGER_SHARED_SECRET (see services/ledger/internal/httpapi/middleware.go
-// and AUTHCORE_SCOPED_CLIENT_KEY_SPEC.md). Fine for now: the only real
-// callers are TrustPay's backend and this service's own webhook routes
-// (which authenticate differently — via the provider's own signature).
-const config = require('../config');
+// Replaces the single static PAYMENTS_SHARED_SECRET — see
+// SERVICE_CREDENTIAL_MODEL.md (repo root) and credentialService.js.
+// Verifies the bearer token, checks it carries at least the route's
+// required scope, and rejects a request whose :tenantId path param
+// doesn't match the credential's own tenant — the credential is now the
+// source of truth, not a URL param nobody was checking against it before.
+const credentialService = require('../services/credentialService');
 
-function requireSharedSecret(req, res, next) {
-  const auth = req.headers.authorization || '';
-  const expected = `Bearer ${config.sharedSecret}`;
-  if (auth !== expected) {
-    return res.status(401).json({ success: false, error: 'Unauthorized' });
-  }
-  next();
+function requireApiKey(minScope) {
+  return async (req, res, next) => {
+    const auth = req.headers.authorization || '';
+    if (!auth.startsWith('Bearer ')) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    const token = auth.slice('Bearer '.length);
+
+    const credential = await credentialService.verify(token);
+    if (!credential) {
+      return res.status(401).json({ success: false, error: 'Unauthorized' });
+    }
+    if (!scopeSatisfies(credential.scope, minScope)) {
+      return res.status(403).json({ success: false, error: 'Insufficient scope' });
+    }
+    if (req.params.tenantId && req.params.tenantId !== credential.tenantId) {
+      return res.status(403).json({ success: false, error: 'Token is not authorized for this tenant' });
+    }
+
+    req.apiCredential = credential;
+    next();
+  };
 }
 
-module.exports = { requireSharedSecret };
+function scopeSatisfies(have, need) {
+  if (have === need) return true;
+  return have === 'admin' && need === 'operate';
+}
+
+module.exports = { requireApiKey };

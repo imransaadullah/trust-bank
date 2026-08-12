@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 class PaymentsClient {
   constructor() {
     this.baseUrl = config.payments.baseUrl;
-    this.sharedSecret = config.payments.sharedSecret;
+    this.apiKey = config.payments.apiKey;
     this.tenantId = config.tenantId;
   }
 
@@ -13,7 +13,7 @@ class PaymentsClient {
     try {
       const response = await axios({
         method, url: `${this.baseUrl}${path}`, data,
-        headers: { Authorization: `Bearer ${this.sharedSecret}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
         timeout: 15000,
       });
       // Unlike the Ledger (Go) service, Payments wraps every response in

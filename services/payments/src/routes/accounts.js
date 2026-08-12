@@ -1,9 +1,10 @@
 const express = require('express');
 const accountProvisioningService = require('../services/accountProvisioningService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
-router.post('/:tenantId/accounts', async (req, res, next) => {
+router.post('/:tenantId/accounts', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { externalCustomerId, email, firstName, lastName, phoneNumber, currency } = req.body;
     if (!externalCustomerId) {
@@ -18,7 +19,7 @@ router.post('/:tenantId/accounts', async (req, res, next) => {
   }
 });
 
-router.get('/:tenantId/accounts/:externalCustomerId', async (req, res, next) => {
+router.get('/:tenantId/accounts/:externalCustomerId', requireApiKey('operate'), async (req, res, next) => {
   try {
     const account = await accountProvisioningService.findByCustomer(req.params.tenantId, req.params.externalCustomerId);
     if (!account) {

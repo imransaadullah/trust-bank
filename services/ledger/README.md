@@ -39,6 +39,14 @@ and keeps running as-is.
   service is never meant to be internet-facing in any deployment model.
   See `../../deploy/NETWORK_TOPOLOGY.md` for how this holds across SaaS,
   on-prem, and hybrid.
+- Scoped, revocable, tenant-bound credentials (`internal/credential`)
+  replace the old single shared secret — see `../../SERVICE_CREDENTIAL_MODEL.md`.
+  Verified live: a `platform-admin` credential provisions tenants; a
+  tenant's `admin` credential issues/lists/revokes its own `operate`
+  credentials and cannot touch another tenant's; a revoked credential is
+  rejected on its very next call; and the actual bug this replaced the
+  old auth for — a credential bound to tenant A being used with tenant
+  B's id — is rejected with 403 on a real request, not just in a test.
 - Locked savings pockets (`internal/wallet/savings.go`) with daily interest
   accrual (`internal/accrual`) — a second ledger-account product type per
   customer, opening/funding/withdrawal composed from the same generic
@@ -52,16 +60,11 @@ and keeps running as-is.
   correctly did nothing on a second same-day tick.
 
 **Explicit placeholders, not production-ready:**
-- **Auth** (`internal/httpapi/middleware.go`, `internal/config`) — a single
-  shared secret plus a trusted `X-Tenant-Id` header. This is a stand-in for
-  the tiered publishable/secret API-key model in
-  `AUTHCORE_SCOPED_CLIENT_KEY_SPEC.md`. Fine for now — there's one real
-  caller (the future TrustPay backend) — but replace before a second real
-  caller shows up. The loopback-only bind (above) is defense-in-depth
-  alongside this, not a substitute for it — a hybrid deployment moves
-  this service's caller onto a different host, at which point network
-  position alone stops being a control and the shared secret is what's
-  actually protecting the request.
+- **No mTLS** — credential scoping (above) and the loopback-only bind are
+  defense-in-depth together, but a hybrid deployment that puts a caller
+  on a genuinely different network still needs a real private tunnel
+  (WireGuard) plus mTLS on top of the bearer token. See
+  `../../deploy/NETWORK_TOPOLOGY.md` and `../../SERVICE_CREDENTIAL_MODEL.md`.
 - **No KYC-tier transaction/daily limits** — `internal/wallet` and
   `internal/ledger` enforce ledger correctness (balance sufficiency,
   account status) but not policy limits by KYC tier. That's deliberately
@@ -109,9 +112,15 @@ make migrate
 # this: the RLS cross-tenant test passed for the wrong reason (superuser
 # connection) until the connection was switched to ledger_app.
 export DATABASE_URL=postgres://ledger_app:change-me-in-production@localhost:5432/trust_bank_ledger
-export LEDGER_SHARED_SECRET=dev-secret
 
 make test   # runs the real integration suite
+
+# Bootstrap the first credentials — see ../../SERVICE_CREDENTIAL_MODEL.md
+export MIGRATE_DATABASE_URL=postgres://postgres@localhost:5432/trust_bank_ledger
+go run ./cmd/bootstrap-key --scope platform-admin --label ops-bootstrap
+# -> use that token to POST /v1/tenants (below), then:
+go run ./cmd/bootstrap-key --scope admin --tenant-id $TENANT_ID --label ops-bootstrap
+
 make run    # starts the HTTP service on :8080
 ```
 
@@ -120,52 +129,65 @@ make run    # starts the HTTP service on :8080
 ```bash
 # Provision a tenant — creates the tenant row, a default chart of
 # accounts, and system float/fee-income ledger accounts. webhookUrl is
-# optional; set it to receive ledger events.
+# optional; set it to receive ledger events. Requires a platform-admin
+# credential — the one bootstrapped above, or issued by another
+# platform-admin credential; not tenant-bound, never embedded in a
+# running service.
 curl -X POST localhost:8080/v1/tenants \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" \
+  -H "Authorization: Bearer $PLATFORM_ADMIN_TOKEN" \
   -d '{"slug":"trustpay","name":"TrustPay","licenseType":"BAAS_RESELLER","baseCurrency":"NGN","webhookUrl":"https://trustpay.example/webhooks/ledger"}'
+
+# Issue an operate-scope credential for a real caller (e.g. trustpay-backend),
+# using the tenant's admin credential from the bootstrap step above.
+curl -X POST localhost:8080/v1/credentials \
+  -H "Authorization: Bearer $ADMIN_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
+  -d '{"label":"trustpay-backend","scope":"operate"}'
+# -> { id, label, scope, tokenPrefix, token }  — token is shown once
+
+# Everything below uses that operate token.
+OPERATE_TOKEN=...
 
 # Open a wallet account for a customer.
 curl -X POST localhost:8080/v1/accounts \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"externalCustomerId":"user-123","productType":"wallet","kycTier":0}'
 
 # Look an account up by the customer ID the calling backend uses.
 curl localhost:8080/v1/customers/user-123/account \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID"
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID"
 
 # Record a deposit the backend already collected via a provider.
 curl -X POST localhost:8080/v1/transfers/deposit/confirm \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"externalCustomerId":"user-123","amount":150000,"providerRef":"paystack-ref-1","reference":"DEP-1","idempotencyKey":"idem-dep-1"}'
 
 # P2P transfer between two TrustPay wallets.
 curl -X POST localhost:8080/v1/transfers/p2p \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"fromExternalCustomerId":"user-123","toExternalCustomerId":"user-456","amount":5000,"reference":"P2P-1","idempotencyKey":"idem-p2p-1"}'
 
 # Record a withdrawal the backend is paying out via a provider.
 curl -X POST localhost:8080/v1/transfers/withdrawal \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"externalCustomerId":"user-123","amount":10000,"reference":"WD-1","idempotencyKey":"idem-wd-1"}'
 
 # Read a balance.
 curl localhost:8080/v1/accounts/$ACCOUNT_ID/balance \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID"
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID"
 
 # Open and fund a locked savings pocket (rate in basis points, e.g. 1200 = 12% APY).
 curl -X POST localhost:8080/v1/savings/accounts \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"externalCustomerId":"user-123","annualRateBps":1200,"lockDays":30,"principalKobo":1000000,"reference":"SAV-1","idempotencyKey":"idem-sav-1"}'
 
 # Withdraw from a matured savings account — rejected with the maturity
 # date if called before lockDays has elapsed.
 curl -X POST localhost:8080/v1/savings/accounts/$SAVINGS_ACCOUNT_ID/withdraw \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID" \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID" \
   -d '{"externalCustomerId":"user-123","amount":50000,"reference":"SAVWD-1","idempotencyKey":"idem-savwd-1"}'
 
 curl localhost:8080/v1/customers/user-123/savings-accounts \
-  -H "Authorization: Bearer $LEDGER_SHARED_SECRET" -H "X-Tenant-Id: $TENANT_ID"
+  -H "Authorization: Bearer $OPERATE_TOKEN" -H "X-Tenant-Id: $TENANT_ID"
 
 # Generic multi-leg entry and reversal are still available directly for
 # anything the convenience routes above don't cover:
@@ -189,8 +211,10 @@ internal/wallet/      product-level ops (open account, p2p, deposit/withdrawal, 
 internal/accrual/     daily interest posting for locked savings accounts
 internal/outbox/      drains event_outbox to tenant webhooks
 internal/tenant/      tenant provisioning
+internal/credential/  scoped/revocable API credentials — see ../../SERVICE_CREDENTIAL_MODEL.md
 internal/httpapi/     thin HTTP layer — no business logic
 cmd/ledger/           entrypoint — starts the HTTP server, the outbox consumer, and the accrual consumer goroutines
+cmd/bootstrap-key/    issues the first credential for a fresh deployment
 ```
 
 ## Testing
@@ -207,7 +231,10 @@ deposit/withdrawal recording, savings funding/lock-enforcement/maturity,
 a customer with both a wallet and a savings account still resolving P2P/
 deposit/withdrawal to the wallet (the regression case for the
 `GetByExternalCustomerID` product-type fix), and interest accrual math +
-same-day idempotency.
+same-day idempotency. `internal/credential/credential_test.go` and
+`internal/httpapi/middleware_test.go` cover credential issuing/verification/
+revocation and, specifically, the tenant-spoofing regression (a credential
+bound to tenant A being rejected when a request claims tenant B).
 
 ## Deployment (VPS / systemd)
 

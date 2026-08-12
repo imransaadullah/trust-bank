@@ -1,11 +1,12 @@
 const express = require('express');
 const reconciliationService = require('../services/reconciliationService');
+const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
 
 // On-demand trigger — useful for ops, and for verifying the behavior
 // without waiting on the background runner's poll interval.
-router.post('/:tenantId/reconcile', async (req, res, next) => {
+router.post('/:tenantId/reconcile', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { staleMinutes, autoRefundMinutes } = req.body || {};
     const results = await reconciliationService.reconcileTenant(req.params.tenantId, {

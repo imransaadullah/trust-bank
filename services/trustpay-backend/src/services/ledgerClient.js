@@ -9,7 +9,7 @@ const logger = require('../utils/logger');
 class LedgerClient {
   constructor() {
     this.baseUrl = config.ledger.baseUrl;
-    this.sharedSecret = config.ledger.sharedSecret;
+    this.apiKey = config.ledger.apiKey;
     this.tenantId = config.tenantId;
   }
 
@@ -18,7 +18,7 @@ class LedgerClient {
       const response = await axios({
         method, url: `${this.baseUrl}${path}`, data,
         headers: {
-          Authorization: `Bearer ${this.sharedSecret}`,
+          Authorization: `Bearer ${this.apiKey}`,
           'X-Tenant-Id': this.tenantId,
           'Content-Type': 'application/json',
         },

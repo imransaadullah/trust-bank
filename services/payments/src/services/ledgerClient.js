@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 class LedgerClient {
   constructor() {
     this.baseUrl = config.ledger.baseUrl;
-    this.sharedSecret = config.ledger.sharedSecret;
+    this.apiKey = config.ledger.apiKey;
   }
 
   async _request(tenantId, method, path, data) {
@@ -15,7 +15,7 @@ class LedgerClient {
         url: `${this.baseUrl}${path}`,
         data,
         headers: {
-          Authorization: `Bearer ${this.sharedSecret}`,
+          Authorization: `Bearer ${this.apiKey}`,
           'X-Tenant-Id': tenantId,
           'Content-Type': 'application/json',
         },

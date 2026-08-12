@@ -84,3 +84,29 @@ model SettlementAttempt {
   @@index([tenantId, status])
   @@map("settlement_attempts")
 }
+
+// ============================================
+// API CREDENTIAL
+// Replaces the single static PAYMENTS_SHARED_SECRET — see
+// SERVICE_CREDENTIAL_MODEL.md (repo root). Every credential is bound to
+// exactly one tenant (unlike the Ledger, Payments has no
+// platform-admin-equivalent concept — tenant identity lives only in the
+// Ledger, this service only configures against a tenantId that already
+// exists there).
+// ============================================
+model ApiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  label       String
+  tokenPrefix String    @unique @map("token_prefix")
+  hashedToken String    @map("hashed_token")
+  scope       String // 'admin' | 'operate'
+  status      String    @default("active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("api_credentials")
+}
