@@ -2,11 +2,28 @@
 
 Regulation as data, not hardcoded product rules — see
 `COMPLIANCE_DESIGN_AND_BACKLOG.md` at the repo root for the design
-principle. Owns two decisions right now: KYC-tier transaction limits
+principle. Owns four decisions now: KYC-tier transaction limits
 (CBN's real three tiers — Tier 1: BVN/NIN, ₦30k/day; Tier 2: gov ID +
-address, ₦500k/day; Tier 3: beneficial ownership, unlimited) and
+address, ₦500k/day; Tier 3: beneficial ownership, unlimited),
 device-binding limits (mandatory since July 1, 2026 — a new device is
-capped for a cooldown window, even for a fully-verified account).
+capped for a cooldown window, even for a fully-verified account),
+transaction monitoring (velocity/structuring/large-single-txn rules),
+and sanctions/watchlist screening.
+
+**"Transaction monitoring," never "AI/ML transaction monitoring,"
+deliberately.** CBN's roadmap language calls this AI/ML; what's built is
+rule-based (velocity thresholds, structuring detection, name matching) —
+see `screeningService.js`'s header comment. The `screenTransaction`/
+`screenSanctions` contract is meant to stay stable if a scored/ML
+implementation replaces the rule evaluation later; that hasn't happened
+yet, and the docs won't claim it has.
+
+**Monitoring flags, sanctions blocks — deliberately different.** A
+brand-new, untuned rules engine auto-blocking real transactions would
+create false-positive friction with no track record to justify it, so
+`screenTransaction` always lets the transaction proceed and writes a
+`ComplianceCase` for human review instead. `screenSanctions` blocks — a
+watchlist match is a hard legal requirement, not a judgment call.
 
 Stateless by design: it computes decisions from facts the caller passes
 in (today's spend so far, whether this device is new). It doesn't track
@@ -43,15 +60,42 @@ trustpay-backend chain:**
   reason (not a generic 500), and a new device's transfer above ₦20,000
   is rejected by the device check specifically — distinguishable from a
   KYC-tier rejection, confirmed by testing both independently.
+- Transaction monitoring: fired 4 real P2P transfers against a policy
+  capped at 3/24h through `trustpay-backend` — all four succeeded (never
+  blocks), and the 4th wrote a `ComplianceCase` with `matchedRules:
+  [{rule: 'velocity_count', count: 4, limit: 3}]`, confirmed via
+  `GET .../cases`. Structuring, distinct-counterparty, and
+  large-single-txn rules verified the same way in
+  `tests/screeningService.test.js`.
+- Sanctions screening: a real transfer attempt from a user whose
+  `displayName` matched a seeded watchlist entry was rejected with
+  `COMPLIANCE_DENIED`, wrote a `severity: 'blocking'` case, and — checked
+  directly against the Ledger — left the sender's balance untouched
+  (the block happens before `ledgerClient.transferP2P` is even called).
+- `reviewCase` updates `status`/`reviewedBy`/`reviewNotes`/`reviewedAt`
+  correctly; a review against an unknown case id returns
+  `CASE_NOT_FOUND`.
 
-**Not built this pass** (tracked in `COMPLIANCE_DESIGN_AND_BACKLOG.md`
-Segment A, deliberately deferred rows): AML/velocity transaction
-screening, sanctions/watchlist screening. The policy engine's shape
-(versioned, tenant/jurisdiction-scoped, single decision API) is meant to
-extend to both without a redesign — see the design doc.
+**Two honest limitations, not glossed over:**
+- **The sanctions watchlist is seed data (`prisma/seed.js`), not a live
+  feed.** There's no OFAC/UN/EU ingestion here — that's real, separate
+  work (fetch, parse, diff, re-import on a schedule). What's real is the
+  schema, the matching algorithm (exact + small-edit-distance against
+  name and aliases), and the API contract. `listSource: "SEED_TEST_DATA"`
+  on every seeded row says so plainly, same as `selfIssuedNuban.js` in
+  `services/payments` is documented as a stub rather than a real bank.
+- **Sanctions screening runs against unverified names.** Today that's
+  `User.displayName` (self-reported) and, for a withdrawal, the request
+  body's `beneficiaryName` (also unverified) — `services/payments`'
+  BVN/NIN `verifyIdentity` call returns a `matchedName` but nothing
+  persists it anywhere in this codebase, so there's no verified legal
+  name to screen against yet. Worth fixing before this matters for real,
+  not assumed away.
 
 **Explicit placeholder:** shared-secret auth, same caveat as the Ledger's
-and Payments'.
+and Payments'. The `cases` review routes have no access control beyond
+that same shared secret — there's no admin/back-office auth model
+anywhere in the platform yet, a known gap, not a new one introduced here.
 
 ## Setup
 
@@ -63,8 +107,9 @@ export DATABASE_URL=postgresql://postgres:password@localhost:5432/trustbank_comp
 npx prisma migrate deploy
 
 npm install
-npm test   # policy versioning + decision math, needs DATABASE_URL
-npm run dev   # :8083
+npm test          # policy versioning + decision math + screening, needs DATABASE_URL
+npm run prisma:seed   # loads synthetic sanctions-watchlist test entries — see prisma/seed.js
+npm run dev       # :8083
 ```
 
 ## API
@@ -91,6 +136,30 @@ curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/device-check \
   -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
   -d '{"userId":"user-123","isNewDevice":true,"amount":2500000}'
 # -> { allowed, capAppliedKobo?, cooldownHours?, reason?, policyVersion }
+
+# Publish a transaction-monitoring policy.
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/monitoring-policy \
+  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -d '{"velocityWindowHours":24,"velocityMaxTransactionCount":10,"velocityMaxDistinctCounterparties":10,"structuringThresholdKobo":50000000,"structuringWindowCount":3,"largeSingleTxnThresholdKobo":500000000}'
+
+# Screen a transaction — never blocks, flags into a ComplianceCase.
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/screen-transaction \
+  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -d '{"userId":"user-123","amount":500000,"counterpartyId":"user-456","recentTransactions":[{"amount":500000,"counterpartyId":"user-456","createdAt":"2026-08-11T10:00:00Z"}]}'
+# -> { flagged, riskLevel, matchedRules, policyVersion }
+
+# Screen a name against the watchlist — a hit is meant to block the caller's transaction.
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/screen-sanctions \
+  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -d '{"userId":"user-123","fullName":"Ada Lovelace"}'
+# -> { hit, matchedEntries }
+
+# Review queue.
+curl localhost:8083/v1/tenants/$TENANT_ID/compliance/cases?status=open \
+  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET"
+curl -X POST localhost:8083/v1/tenants/$TENANT_ID/compliance/cases/$CASE_ID/review \
+  -H "Authorization: Bearer $COMPLIANCE_SHARED_SECRET" \
+  -d '{"status":"dismissed","reviewedBy":"ops@trustpay.example","reviewNotes":"False positive."}'
 ```
 
 Amounts are kobo, matching the rest of the platform.
@@ -98,11 +167,20 @@ Amounts are kobo, matching the rest of the platform.
 ## Layout
 
 ```
-prisma/               KYCTierPolicy, DeviceBindingPolicy — immutable, versioned rows
+prisma/               KYCTierPolicy, DeviceBindingPolicy, TransactionMonitoringPolicy —
+                       immutable, versioned rows. SanctionsWatchlistEntry (not
+                       tenant-scoped), ComplianceCase — the service's first persisted
+                       state beyond policy, an audit trail, not per-user decision input.
+prisma/seed.js         synthetic sanctions-watchlist test entries — not a live feed
 src/services/
-  policyService.js      publish + "current effective" lookup
-  decisionService.js     pure policy math over caller-supplied facts
+  policyService.js             KYC-tier + device-binding: publish + "current effective" lookup
+  monitoringPolicyService.js    same pattern, for TransactionMonitoringPolicy
+  decisionService.js            pure policy math over caller-supplied facts (KYC-tier, device)
+  screeningService.js           screenTransaction (flags), screenSanctions (blocks),
+                                 listCases/reviewCase — rule-based, ML-ready contract
 src/routes/
-  policies.js            admin: publish a new policy version
-  decisions.js            the two decision endpoints
+  policies.js            admin: publish a KYC-tier or device policy version
+  decisions.js            the two KYC-tier/device decision endpoints
+  monitoring.js           monitoring-policy publish, screen-transaction,
+                           screen-sanctions, cases list/review
 ```

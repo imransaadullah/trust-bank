@@ -13,4 +13,10 @@ class NoPolicyConfiguredError extends ComplianceError {
   }
 }
 
-module.exports = { ComplianceError, NoPolicyConfiguredError };
+class CaseNotFoundError extends ComplianceError {
+  constructor(caseId) {
+    super(`No compliance case found with id ${caseId}`, 'CASE_NOT_FOUND', 404);
+  }
+}
+
+module.exports = { ComplianceError, NoPolicyConfiguredError, CaseNotFoundError };

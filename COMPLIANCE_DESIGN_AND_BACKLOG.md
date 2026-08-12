@@ -60,8 +60,8 @@ Every gap/edge from `TRUSTPAY_MARKET_STRATEGY.md`, given a home. "Home" means wh
 |---|---|---|---|
 | Correct 3-tier KYC (₦30k/₦500k/unlimited) | `services/compliance` (new), `trustpay-backend` (consumes) | **Corrected to Phase 1** | Originally implicit in Phase 1's "wallet" scope but under-specified; the ad-hoc Tier 0/1 scheme was the actual bug. |
 | Device binding + new-device transfer cap | `services/compliance` (new), `trustpay-backend` (device registry, JWT device claim) | **Corrected to Phase 1** | Live regulation since July 1, 2026 — was not in the original phase plan at all. |
-| AI/ML transaction monitoring / AML | `services/compliance` (new) | Originally Phase 5 ("Regulatory automation"), **pull forward given the June 2026 roadmap deadline** | Start rules-based (velocity thresholds), upgrade to model-based later behind the same `screenTransaction` contract — the interface doesn't change when the implementation does. |
-| Sanctions/watchlist screening | `services/compliance` (new) | Phase 5, unchanged | Lower urgency than the above three; no hard deadline surfaced in research. |
+| Transaction monitoring / AML | `services/compliance` | **Done** | Rules-based (velocity, distinct-counterparty, structuring, large-single-txn) via `screenTransaction` — never blocks, writes a `ComplianceCase` for review. Named "transaction monitoring," not "AI/ML," since that's what's actually built; the contract is meant to stay stable if a scored/ML implementation replaces the rule evaluation later. |
+| Sanctions/watchlist screening | `services/compliance` | **Done** | `screenSanctions` blocks on a match (unlike monitoring). Watchlist is seed/test data (`prisma/seed.js`), not a live OFAC/UN/EU feed — that ingestion is separate, undone work. Screens `User.displayName`/`beneficiaryName`, both unverified — no verified legal name is persisted anywhere yet. |
 
 ### Segment B — Reliability & Reconciliation (`services/payments`)
 

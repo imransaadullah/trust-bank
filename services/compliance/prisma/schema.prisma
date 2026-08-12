@@ -55,3 +55,77 @@ model DeviceBindingPolicy {
   @@index([tenantId, jurisdiction, effectiveFrom])
   @@map("device_binding_policies")
 }
+
+// ============================================
+// TRANSACTION MONITORING POLICY
+// Same versioning discipline as the other two. Rule-based (velocity,
+// structuring, large-single-txn thresholds) — not a trained model. See
+// screeningService.js's header comment for why, and for the contract
+// meant to stay stable if a scored/ML implementation replaces the rule
+// evaluation later.
+// ============================================
+model TransactionMonitoringPolicy {
+  id                                String   @id @default(uuid())
+  tenantId                          String   @map("tenant_id")
+  jurisdiction                      String   @default("NG")
+  velocityWindowHours               Int      @map("velocity_window_hours")
+  velocityMaxTransactionCount       Int      @map("velocity_max_transaction_count")
+  velocityMaxDistinctCounterparties Int      @map("velocity_max_distinct_counterparties")
+  structuringThresholdKobo          Int      @map("structuring_threshold_kobo")
+  structuringWindowCount            Int      @map("structuring_window_count")
+  largeSingleTxnThresholdKobo       Int      @map("large_single_txn_threshold_kobo")
+  version                           Int
+  effectiveFrom                     DateTime @map("effective_from")
+  createdAt                         DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, jurisdiction, version])
+  @@index([tenantId, jurisdiction, effectiveFrom])
+  @@map("transaction_monitoring_policies")
+}
+
+// ============================================
+// SANCTIONS WATCHLIST ENTRY
+// Not tenant-scoped — a sanctioned name is sanctioned regardless of
+// which tenant's customer they are. Seed/test data only in this pass,
+// not a live OFAC/UN/EU feed — see screeningService.js and the README.
+// ============================================
+model SanctionsWatchlistEntry {
+  id            String    @id @default(uuid())
+  listSource    String    @map("list_source") // e.g. "SEED_TEST_DATA" — not a real feed yet
+  fullName      String    @map("full_name")
+  aliases       Json      @default("[]")
+  dateOfBirth   DateTime? @map("date_of_birth")
+  importBatchId String    @map("import_batch_id")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@index([fullName])
+  @@map("sanctions_watchlist_entries")
+}
+
+// ============================================
+// COMPLIANCE CASE
+// The audit/review record transaction monitoring and sanctions
+// screening write to on a match. This is the service's first persisted
+// state beyond policy data — decisionService.js's "stateless" claim is
+// about decision *inputs* (no per-user history queried), which still
+// holds; an audit trail of what got flagged is a different, expected
+// kind of state for a compliance system to hold, not a silent
+// contradiction of that claim.
+// ============================================
+model ComplianceCase {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  userId       String    @map("user_id") // external customer id, same opaque-string convention as elsewhere
+  caseType     String    @map("case_type") // 'transaction_monitoring' | 'sanctions_hit'
+  severity     String // 'low' | 'medium' | 'high' | 'blocking'
+  matchedRules Json      @map("matched_rules")
+  context      Json // amount, counterparty, transaction reference
+  status       String    @default("open") // 'open' | 'reviewed' | 'dismissed' | 'escalated'
+  reviewedAt   DateTime? @map("reviewed_at")
+  reviewedBy   String?   @map("reviewed_by")
+  reviewNotes  String?   @map("review_notes")
+  createdAt    DateTime  @default(now()) @map("created_at")
+
+  @@index([tenantId, status, createdAt])
+  @@map("compliance_cases")
+}

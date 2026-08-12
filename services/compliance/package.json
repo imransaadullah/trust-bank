@@ -9,9 +9,13 @@
     "prisma:generate": "npx prisma generate",
     "prisma:migrate": "npx prisma migrate dev",
     "prisma:deploy": "npx prisma migrate deploy",
+    "prisma:seed": "node prisma/seed.js",
     "postinstall": "npx prisma generate",
     "test": "jest --forceExit",
     "test:watch": "jest --watch"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "license": "ISC",
   "dependencies": {

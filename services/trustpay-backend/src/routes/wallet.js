@@ -26,6 +26,21 @@ async function amountTransactedTodayKobo(userId) {
   return result._sum.amount || 0;
 }
 
+// A fixed, generous lookback rather than the monitoring policy's actual
+// configured window — trustpay-backend doesn't need to know that value,
+// compliance filters this down to its own policy window itself. Keeps
+// "the rule changes without a redeploy here" true for this check too.
+async function recentTransactionsForMonitoring(userId) {
+  const windowStart = new Date(Date.now() - 7 * 24 * 3_600_000);
+  const rows = await prisma.transaction.findMany({
+    where: { userId, createdAt: { gte: windowStart }, status: { not: 'reversed' } },
+    select: { amount: true, counterpartyUserId: true, counterpartyLabel: true, createdAt: true },
+  });
+  return rows.map((r) => ({
+    amount: r.amount, counterpartyId: r.counterpartyUserId || r.counterpartyLabel, createdAt: r.createdAt,
+  }));
+}
+
 // The one call site both /transfer and /withdraw go through instead of a
 // hardcoded `if (user.kycTier < 1)` amount check — see
 // COMPLIANCE_DESIGN_AND_BACKLOG.md. Two distinct checks, deliberately:
@@ -34,7 +49,12 @@ async function amountTransactedTodayKobo(userId) {
 // CBN tier, so there's no policy to check against). Device binding
 // applies regardless of tier — CBN's rule caps a new device "even for
 // fully-verified Tier 3 accounts."
-async function enforceCompliance({ user, deviceId, amount }) {
+// counterpartyId/transactionRef feed transaction monitoring's velocity/
+// structuring rules; namesToScreen feeds sanctions screening — the
+// sender's own displayName always, plus (for a withdrawal) the external
+// beneficiary's name. Monitoring flags but never blocks (see
+// services/compliance's screeningService.js); a sanctions hit does.
+async function enforceCompliance({ user, deviceId, amount, counterpartyId, transactionRef, namesToScreen = [] }) {
   if (user.kycTier >= 1) {
     const spentToday = await amountTransactedTodayKobo(user.id);
     const kycDecision = await complianceClient.checkKYCTier({
@@ -51,6 +71,17 @@ async function enforceCompliance({ user, deviceId, amount }) {
     userId: user.id, isNewDevice: !device, deviceAgeHours, amount,
   });
   if (!deviceDecision.allowed) throw new ComplianceDeniedError(deviceDecision.reason);
+
+  const recentTransactions = await recentTransactionsForMonitoring(user.id);
+  await complianceClient.screenTransaction({
+    userId: user.id, amount, counterpartyId, recentTransactions, transactionRef,
+  });
+
+  const namesToCheck = [user.displayName, ...namesToScreen].filter(Boolean);
+  for (const fullName of namesToCheck) {
+    const sanctionsDecision = await complianceClient.screenSanctions({ userId: user.id, fullName });
+    if (sanctionsDecision.hit) throw new ComplianceDeniedError('Transaction blocked by sanctions screening');
+  }
 }
 
 router.get('/balance', requireAuth, async (req, res, next) => {
@@ -90,9 +121,11 @@ router.post('/transfer', requireAuth, async (req, res, next) => {
       return res.status(404).json({ success: false, error: 'No TrustPay user with that phone number' });
     }
 
-    await enforceCompliance({ user: sender, deviceId: req.deviceId, amount });
-
     const reference = generateReference('P2P');
+    await enforceCompliance({
+      user: sender, deviceId: req.deviceId, amount, counterpartyId: recipient.id, transactionRef: reference,
+    });
+
     const entry = await ledgerClient.transferP2P({
       fromExternalCustomerId: sender.id, toExternalCustomerId: recipient.id,
       amount, reference, idempotencyKey: uuidv4(), description,
@@ -129,9 +162,11 @@ router.post('/withdraw', requireAuth, async (req, res, next) => {
     const user = await loadUserOrThrow(req.userId);
     if (user.kycTier < 1) throw new KYCTierRequiredError(1);
 
-    await enforceCompliance({ user, deviceId: req.deviceId, amount });
-
     const reference = generateReference('WD');
+    await enforceCompliance({
+      user, deviceId: req.deviceId, amount, counterpartyId: beneficiaryAccountNumber,
+      transactionRef: reference, namesToScreen: [beneficiaryName],
+    });
     // Debit first — the Ledger's insufficient-balance guard is the
     // authoritative check. If the payout below fails, Payments reverses
     // this same entry itself (see services/payments/settlementService.js).

@@ -36,6 +36,13 @@ instances during development:**
   a generic 500), and — tested as an independent case, not conflated
   with the KYC-tier check — a brand-new device is capped at ₦20,000
   even when well within the KYC-tier daily limit and the user's balance
+- Transaction monitoring and sanctions screening, both wired into the
+  same `enforceCompliance` helper: 4 real P2P transfers against a
+  velocity policy capped at 3/24h all succeeded (monitoring never
+  blocks) and the 4th produced a case on `services/compliance`'s side;
+  a transfer from a user whose `displayName` matched a seeded sanctions
+  entry was rejected with `COMPLIANCE_DENIED` before the Ledger was ever
+  called — confirmed by checking the sender's balance was untouched
 - Savings, via the Ledger's `internal/wallet/savings.go` and
   `internal/accrual` directly (`/savings` here is a thin pass-through —
   see `services/ledger`'s README for what was verified live: open/fund,

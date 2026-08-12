@@ -6,6 +6,7 @@ const { requireSharedSecret } = require('./middleware/auth');
 const errorHandler = require('./middleware/errorHandler');
 const policiesRoutes = require('./routes/policies');
 const decisionsRoutes = require('./routes/decisions');
+const monitoringRoutes = require('./routes/monitoring');
 
 function createApp() {
   const app = express();
@@ -17,6 +18,7 @@ function createApp() {
 
   app.use('/v1/tenants', requireSharedSecret, policiesRoutes);
   app.use('/v1/tenants', requireSharedSecret, decisionsRoutes);
+  app.use('/v1/tenants', requireSharedSecret, monitoringRoutes);
 
   app.use(errorHandler);
 

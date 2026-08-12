@@ -42,6 +42,23 @@ class ComplianceClient {
       userId, isNewDevice, deviceAgeHours, amount,
     });
   }
+
+  // Rule-based, not ML — see services/compliance's screeningService.js.
+  // Never throws on a flagged result; flags are for compliance's own
+  // case queue, not a reason to block the caller's transaction.
+  screenTransaction({ userId, amount, counterpartyId, recentTransactions, transactionRef }) {
+    return this._request('POST', `/v1/tenants/${this.tenantId}/compliance/screen-transaction`, {
+      userId, amount, counterpartyId, recentTransactions, transactionRef,
+    });
+  }
+
+  // Unlike screenTransaction, a hit here is meant to block — see
+  // enforceCompliance in wallet.js.
+  screenSanctions({ userId, fullName }) {
+    return this._request('POST', `/v1/tenants/${this.tenantId}/compliance/screen-sanctions`, {
+      userId, fullName,
+    });
+  }
 }
 
 module.exports = new ComplianceClient();
