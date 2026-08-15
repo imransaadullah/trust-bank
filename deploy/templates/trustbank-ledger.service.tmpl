@@ -1,22 +1,20 @@
 [Unit]
-Description=TrustPay Product Backend
+Description=trust-bank Core Ledger Service
 Documentation=https://github.com/imransaadullah/trust-bank
 After=network.target postgresql.service
 Wants=postgresql.service
 
 [Service]
 Type=exec
-User=ubuntu
-Group=ubuntu
-WorkingDirectory=/home/ubuntu/apps/trustpay-backend
-EnvironmentFile=-/home/ubuntu/apps/trustpay-backend/.env
+User={{DEPLOY_USER}}
+Group={{DEPLOY_USER}}
+WorkingDirectory={{APP_ROOT}}/services/ledger
+EnvironmentFile=-{{APP_ROOT}}/services/ledger/.env
 
-ExecStart=/home/ubuntu/.nvm/versions/node/v24.14.1/bin/node src/index.js
+ExecStart={{APP_ROOT}}/services/ledger/bin/ledger
 
 Restart=always
 RestartSec=5
-
-Environment=NODE_ENV=production
 
 StandardOutput=journal
 StandardError=journal

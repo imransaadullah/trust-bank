@@ -7,7 +7,7 @@ const router = express.Router();
 router.post('/:tenantId/compliance/kyc-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { jurisdiction, tier, requiredVerifications, dailyLimitKobo, singleTxnLimitKobo, effectiveFrom } = req.body;
-    if (!tier || !requiredVerifications) {
+    if (tier == null || !requiredVerifications) {
       return res.status(400).json({ success: false, error: 'tier and requiredVerifications are required' });
     }
     const policy = await policyService.publishKYCPolicy({

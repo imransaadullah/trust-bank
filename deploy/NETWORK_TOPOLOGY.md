@@ -22,6 +22,12 @@ is the only process binding a public interface, and it proxies to
 TrustPay Backend alone. No further setup needed — same-host `localhost`
 calls between services work exactly as before this change.
 
+`install.sh` (this directory) provisions exactly this topology on a fresh
+Ubuntu 22.04/24.04 box — system deps, all four services built/migrated/
+running under systemd, Caddy wired up. `provision-tenant.sh` onboards a
+tenant onto an already-installed box. See `README.md` for the full
+runbook.
+
 ## On-prem (a bank/MFB runs everything inside their own perimeter)
 
 The customer's own network team owns the perimeter (firewall, VPN, DMZ

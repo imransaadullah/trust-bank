@@ -7,7 +7,7 @@ const router = express.Router();
 router.post('/:tenantId/compliance/kyc-tier-check', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { jurisdiction, userId, tier, amount, amountTransactedTodayKobo } = req.body;
-    if (!userId || !tier || amount == null) {
+    if (!userId || tier == null || amount == null) {
       return res.status(400).json({ success: false, error: 'userId, tier, and amount are required' });
     }
     const decision = await decisionService.evaluateKYCTier({
