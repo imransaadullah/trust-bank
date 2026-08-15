@@ -38,8 +38,15 @@ const { ProviderNotImplementedError } = require('../utils/errors');
  * @typedef {Object} BillPurchaseResult
  * @property {boolean} success
  * @property {string|null} providerReference
- * @property {'completed'|'failed'} status
+ * @property {'processing'|'completed'|'failed'} status a provider accepting the request
+ *   is not the same as confirming it — 'processing' means accepted, not yet
+ *   confirmed; only checkPurchaseStatus (or a webhook, once one exists) may
+ *   report 'completed'. Never assume acceptance means completion.
  * @property {string} [message]
+ *
+ * @typedef {Object} PurchaseStatus
+ * @property {'processing'|'completed'|'failed'} status
+ * @property {string} [failureReason]
  */
 class BillsProvider {
   constructor(name) {
@@ -59,6 +66,15 @@ class BillsProvider {
   /** @returns {Promise<BillPurchaseResult>} */
   async purchaseBill(_input) {
     throw new ProviderNotImplementedError(this.name, 'purchaseBill');
+  }
+
+  /**
+   * Poll the provider for a purchase's current status — the reconciliation
+   * path for a 'processing' purchase that never resolved synchronously.
+   * @returns {Promise<PurchaseStatus>}
+   */
+  async checkPurchaseStatus(_providerRef) {
+    throw new ProviderNotImplementedError(this.name, 'checkPurchaseStatus');
   }
 }
 

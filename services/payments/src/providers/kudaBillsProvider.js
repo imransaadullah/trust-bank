@@ -59,9 +59,13 @@ class KudaBillsProvider extends BillsProvider {
     throw new Error('KudaBillsProvider: failed to obtain access token');
   }
 
-  async _makeRequest(serviceType, payload, innerKey = 'data') {
+  // requestRefOverride matters for purchaseBill specifically: BILL_TSQ
+  // (checkPurchaseStatus) can look a purchase up by the exact requestRef
+  // used to make it, so purchaseBill passes our own reference here
+  // instead of letting one get auto-generated and discarded.
+  async _makeRequest(serviceType, payload, innerKey = 'data', requestRefOverride) {
     const token = await this._getAccessToken();
-    const requestRef = `REQ${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
+    const requestRef = requestRefOverride || `REQ${Date.now()}${Math.random().toString(36).substring(2, 8).toUpperCase()}`;
 
     let response;
     try {
@@ -191,20 +195,50 @@ class KudaBillsProvider extends BillsProvider {
       Amount: Math.round(amount).toString(),
     };
 
-    const result = await this._makeRequest('ADMIN_PURCHASE_BILL', payload);
+    const result = await this._makeRequest('ADMIN_PURCHASE_BILL', payload, 'data', ref);
 
     if (result.success && result.data) {
+      // Acceptance, not confirmation — Kuda's own docs note tokens/PINs
+      // "are not always returned in the purchase response depending on
+      // the bill type," with confirmation following via the TSQ service
+      // "after a few seconds" or a webhook. Never assume this response is
+      // final; checkPurchaseStatus is what confirms it.
       return {
         success: true,
         providerReference: result.data.reference || result.data.TransactionReference || ref,
-        status: 'completed',
-        message: result.data.message || 'Bill payment successful',
+        status: 'processing',
+        message: result.data.message || 'Bill purchase accepted, pending confirmation',
       };
     }
     return {
       success: false, providerReference: null, status: 'failed',
       message: result.error || 'Bill payment failed',
     };
+  }
+
+  // BILL_TSQ — "Check Bill Purchase Status." providerRef here is our own
+  // reference (the requestRef purchaseBill used, per the note above),
+  // passed as BillRequestRef rather than billResponseReference (Kuda's
+  // own reference), since that's the one this codebase always has on
+  // hand from a BillPaymentAttempt row without a second lookup.
+  async checkPurchaseStatus(providerRef) {
+    const result = await this._makeRequest('BILL_TSQ', { BillRequestRef: providerRef }, 'Data');
+
+    if (!result.success || !result.data) {
+      // Couldn't get a confirmed answer — stay processing rather than
+      // guessing; the next reconciliation pass tries again.
+      return { status: 'processing' };
+    }
+
+    const finalStatus = String(result.data.finalStatus || '').toLowerCase();
+    if (finalStatus === 'successful') {
+      return { status: 'completed' };
+    }
+    if (finalStatus.includes('fail') || finalStatus.includes('revers')) {
+      return { status: 'failed', failureReason: result.data.finalStatus || 'Kuda reported the purchase failed' };
+    }
+    // Any other value (pending/processing/unrecognized) — conservative default.
+    return { status: 'processing' };
   }
 }
 

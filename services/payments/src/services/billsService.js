@@ -53,6 +53,9 @@ async function purchaseBill(tenantId, input) {
     await prisma.billPaymentAttempt.update({
       where: { id: attempt.id }, data: { status: 'resolved', resolvedAt: new Date() },
     });
+  } else if (result.success && result.status === 'processing') {
+    // Accepted, not confirmed — stays 'pending' (already its state);
+    // reconciliation resolves it once checkPurchaseStatus confirms.
   } else {
     await reverseAndFail(tenantId, attempt, result.message || 'Provider bill payment failed');
   }
@@ -75,10 +78,53 @@ async function reverseAndFail(tenantId, attempt, reason) {
   });
 }
 
+// Mirrors settlementService.js's applyOutboundOutcome/reconcileOutboundAttempt/
+// autoRefundStaleAttempt trio exactly — the bills side of the same pattern,
+// against BillPaymentAttempt instead of SettlementAttempt.
+async function applyBillOutcome(tenantId, attempt, outcome) {
+  if (outcome.status === 'completed') {
+    await prisma.billPaymentAttempt.update({
+      where: { id: attempt.id }, data: { status: 'resolved', resolvedAt: new Date() },
+    });
+    return { action: 'resolved' };
+  }
+  if (outcome.status === 'failed') {
+    await reverseAndFail(tenantId, attempt, outcome.failureReason || 'Provider confirmed bill payment failure');
+    return { action: 'reversed' };
+  }
+  return { action: 'still-pending' };
+}
+
+// Polls the provider directly via checkPurchaseStatus — the mechanism
+// that actually resolves a 'processing' purchase now, not just a
+// crash-recovery backstop. See billsProvider.js's BillPurchaseResult doc.
+async function reconcileBillAttempt(attempt) {
+  const { provider } = await billsConfigService.getProviderForTenant(attempt.tenantId);
+  let outcome;
+  try {
+    outcome = await provider.checkPurchaseStatus(attempt.providerRef);
+  } catch (err) {
+    logger.error(`[Bills] checkPurchaseStatus failed for attempt ${attempt.id}: ${err.message}`);
+    return { action: 'skipped', reason: err.message };
+  }
+  return applyBillOutcome(attempt.tenantId, attempt, outcome);
+}
+
+// The auto-refund SLA made real for bills too: an attempt still
+// unresolved past the configured window gets reversed regardless of
+// what the provider says (or doesn't say).
+async function autoRefundStaleBillAttempt(attempt, reason) {
+  await reverseAndFail(attempt.tenantId, attempt, reason);
+  return { action: 'auto-refunded' };
+}
+
 function findAttempt(tenantId, provider, providerRef) {
   return prisma.billPaymentAttempt.findUnique({
     where: { tenantId_provider_providerRef: { tenantId, provider, providerRef } },
   });
 }
 
-module.exports = { getBillers, verifyBillCustomer, purchaseBill };
+module.exports = {
+  getBillers, verifyBillCustomer, purchaseBill,
+  reconcileBillAttempt, autoRefundStaleBillAttempt,
+};

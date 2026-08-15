@@ -13,6 +13,7 @@ const webhooksRoutes = require('./routes/webhooks');
 const reconciliationRoutes = require('./routes/reconciliation');
 const billsConfigRoutes = require('./routes/billsConfig');
 const billsRoutes = require('./routes/bills');
+const billsReconciliationRoutes = require('./routes/billsReconciliation');
 
 function createApp() {
   const app = express();
@@ -43,6 +44,7 @@ function createApp() {
   app.use('/v1/tenants', reconciliationRoutes);
   app.use('/v1/tenants', billsConfigRoutes);
   app.use('/v1/tenants', billsRoutes);
+  app.use('/v1/tenants', billsReconciliationRoutes);
 
   app.use(errorHandler);
 

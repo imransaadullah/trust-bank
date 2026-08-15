@@ -73,6 +73,31 @@ Paystack HTTP round trip:**
   bills-only tenant to also configure a payment rail. Also verified: a
   tenant with *only* a bills config (no `TenantProviderConfig` row at
   all) works fine — the whole point of keeping the two tables separate.
+  **A correctness fix from the pass that added bills reconciliation:**
+  `KudaBillsProvider.purchaseBill` no longer treats Kuda's HTTP acceptance
+  as `'completed'` — Kuda's own docs note tokens/PINs "are not always
+  returned in the purchase response depending on the bill type," with
+  confirmation following via a dedicated `BILL_TSQ` status-query call "a
+  few seconds" later. Acceptance now returns `'processing'`; only
+  `checkPurchaseStatus` (via `BILL_TSQ`) can confirm `'completed'`. The
+  original code made the same synchronous assumption the old
+  `truechat/core-banking` system did — grepping that old codebase found
+  it never actually resolved a `BILL_PAYMENT_SUCCESS`/`BILL_PAYMENT_FAILED`
+  webhook (both fell into an `unknown event` no-op branch), so its
+  behavior was "never caught wrong," not "verified correct."
+- **Bills reconciliation** (`src/services/billsReconciliationService.js`),
+  mirroring the settlement-reconciliation pattern exactly but against
+  `BillPaymentAttempt`/`TenantBillsProviderConfig`: a stale `'pending'`
+  purchase gets polled via `checkPurchaseStatus` and resolved or reversed;
+  one still `'processing'` past the auto-refund SLA gets refunded
+  regardless. Verified live against a real Ledger with three real debit
+  journal entries: a `completed` result resolved without touching the
+  Ledger, a `failed` result reversed the debit, and a 90-minute-old
+  `processing` attempt past a 60-minute SLA was auto-refunded — the
+  customer's real balance was confirmed exactly right after all three
+  (only the resolved one stayed debited). The original request-level
+  failure path (bad credentials, rejected before any "processing" state
+  is reached) was re-verified unchanged.
 
 **Not verified — needs live Paystack credentials this environment doesn't
 have:** `provisionAccount` actually creating a Paystack DVA, `verifyIdentity`
@@ -85,10 +110,7 @@ of these is the same one exercised (successfully) elsewhere — only the
 **Scoped out of reconciliation, deliberately:** inbound (a deposit that
 never arrives) has no comparable "ask the provider what happened" recovery
 path — if money never reached Paystack there's nothing to poll for. This
-pass covers outbound (withdrawal payouts) only. **Bill purchases have no
-reconciliation either** — if a provider call times out after the debit
-already happened, there's no poll-for-status recovery path yet, the same
-gap as inbound settlement. A real gap, not assumed away.
+pass covers outbound (withdrawal payouts) and bill purchases only.
 
 **Explicit placeholders:**
 - **No mTLS** — see the Ledger's README and `../../deploy/NETWORK_TOPOLOGY.md`;
@@ -182,9 +204,16 @@ curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills/verify \
 
 # Same debit-first-on-the-Ledger-then-call pattern as payouts —
 # debitJournalEntryId lets a provider failure reverse automatically.
+# Returns 'pending' on acceptance, not an immediate final result — see
+# the "what's real" section on why purchaseBill doesn't assume completion.
 curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills/purchase \
   -H "Authorization: Bearer $OPERATE_TOKEN" \
   -d '{"externalCustomerId":"user-123","billerCode":"biller-1","customerId":"08010000000","amount":50000,"reference":"BILL-1","debitJournalEntryId":"<ledger-journal-entry-id>"}'
+
+# On-demand bills reconciliation — the background runner does this
+# automatically every BILLS_RECONCILIATION_POLL_INTERVAL_MINUTES.
+curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills-reconcile \
+  -H "Authorization: Bearer $OPERATE_TOKEN" -d '{}'
 ```
 
 ## Layout
@@ -199,9 +228,10 @@ src/providers/         payment rails: provider.js (contract) + paystack.js + sel
 src/crypto/            tenant credential encryption at rest — shared by both config services
 src/services/          tenantConfigService, accountProvisioningService, settlementService,
                        reconciliationService, reconciliationRunner, ledgerClient, credentialService,
-                       billsConfigService, billsService
+                       billsConfigService, billsService, billsReconciliationService,
+                       billsReconciliationRunner
 src/routes/            tenantConfig, accounts, identity, payouts, webhooks, reconciliation,
-                       credentials, billsConfig, bills
+                       credentials, billsConfig, bills, billsReconciliation
 ```
 
 ## Testing
@@ -220,8 +250,13 @@ revocation and, specifically, the tenant-spoofing regression (a
 credential bound to tenant A being rejected when a request's `:tenantId`
 claims tenant B). `tests/billsConfigService.test.js` covers bills config
 set/get and, specifically, that a bills-only tenant (no payment-rail
-config row) works. The inbound settlement flow, reconciliation's
-age-threshold branching, and the bills debit/reverse-on-failure flow
-(a genuine Kuda 401) were verified manually end-to-end against a live
-Ledger during development (see the "what's real" section above) — not
-yet captured as automated integration tests in this repo.
+config row) works. `tests/billsReconciliation.test.js` covers
+`reconcileBillAttempt`'s four branches and `autoRefundStaleBillAttempt`,
+plus `reconcileTenantBills`'s auto-refund-past-SLA behavior and the
+bills-only-tenant case, against a real Postgres with
+`KudaBillsProvider.prototype.checkPurchaseStatus` mocked. The inbound
+settlement flow, reconciliation's age-threshold branching, and the bills
+debit/reverse-on-failure flow (a genuine Kuda 401) were verified manually
+end-to-end against a live Ledger during development (see the "what's
+real" section above) — not yet captured as automated integration tests
+in this repo.

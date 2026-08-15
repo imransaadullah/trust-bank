@@ -7,7 +7,7 @@ const { KudaBillsProvider } = require('../src/providers/kudaBillsProvider');
 const { VtpassBillsProvider } = require('../src/providers/vtpassBillsProvider');
 const { getBillsProvider, BILLS_PROVIDERS } = require('../src/providers/billsRegistry');
 
-const CONTRACT_METHODS = ['getBillers', 'verifyBillCustomer', 'purchaseBill'];
+const CONTRACT_METHODS = ['getBillers', 'verifyBillCustomer', 'purchaseBill', 'checkPurchaseStatus'];
 
 describe('bills provider contract conformance', () => {
   test.each(Object.entries(BILLS_PROVIDERS))('%s implements every contract method', (name, ProviderClass) => {

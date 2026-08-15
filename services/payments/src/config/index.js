@@ -29,4 +29,13 @@ module.exports = {
     staleMinutes: parseInt(process.env.RECONCILIATION_STALE_MINUTES || '15', 10),
     autoRefundMinutes: parseInt(process.env.RECONCILIATION_AUTO_REFUND_MINUTES || '60', 10),
   },
+  // A separate job from the above, against BillPaymentAttempt/
+  // TenantBillsProviderConfig rather than SettlementAttempt/
+  // TenantProviderConfig — own config block even though the defaults
+  // happen to match, since they're tuning different tables.
+  billsReconciliation: {
+    pollIntervalMinutes: parseInt(process.env.BILLS_RECONCILIATION_POLL_INTERVAL_MINUTES || '5', 10),
+    staleMinutes: parseInt(process.env.BILLS_RECONCILIATION_STALE_MINUTES || '15', 10),
+    autoRefundMinutes: parseInt(process.env.BILLS_RECONCILIATION_AUTO_REFUND_MINUTES || '60', 10),
+  },
 };

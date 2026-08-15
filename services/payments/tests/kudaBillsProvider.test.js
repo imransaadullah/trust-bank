@@ -79,7 +79,7 @@ describe('KudaBillsProvider.verifyBillCustomer', () => {
 });
 
 describe('KudaBillsProvider.purchaseBill', () => {
-  test('sends ADMIN_PURCHASE_BILL with the amount as a kobo string, not naira-converted', async () => {
+  test('sends ADMIN_PURCHASE_BILL with the amount as a kobo string, and the acceptance is "processing", not "completed"', async () => {
     mockToken();
     axios.post.mockResolvedValueOnce({ data: { status: true, data: { reference: 'kuda-ref-1' } } });
 
@@ -91,6 +91,9 @@ describe('KudaBillsProvider.purchaseBill', () => {
     const purchaseCall = axios.post.mock.calls[1];
     expect(purchaseCall[1]).toMatchObject({
       serviceType: 'ADMIN_PURCHASE_BILL',
+      // requestRef is our own reference, not an auto-generated one — so
+      // checkPurchaseStatus can look this exact purchase up again later.
+      requestRef: 'BILL-1',
       data: {
         CustomerFirstName: 'Ada',
         CustomerIdentifier: '1234567890',
@@ -99,10 +102,13 @@ describe('KudaBillsProvider.purchaseBill', () => {
         Amount: '150000',
       },
     });
-    expect(result).toMatchObject({ success: true, providerReference: 'kuda-ref-1', status: 'completed' });
+    // Kuda accepting the request is not the same as confirming it — see
+    // billsProvider.js's BillPurchaseResult doc and kuda-api-docs.md's
+    // note that PIN/token confirmation can follow via TSQ or a webhook.
+    expect(result).toMatchObject({ success: true, providerReference: 'kuda-ref-1', status: 'processing' });
   });
 
-  test('returns a failed result without throwing when Kuda rejects the purchase', async () => {
+  test('returns a failed result without throwing when Kuda rejects the purchase outright', async () => {
     mockToken();
     axios.post.mockResolvedValueOnce({ data: { status: false, message: 'Insufficient pool balance' } });
 
@@ -111,6 +117,49 @@ describe('KudaBillsProvider.purchaseBill', () => {
     });
 
     expect(result).toEqual({ success: false, providerReference: null, status: 'failed', message: 'Insufficient pool balance' });
+  });
+});
+
+describe('KudaBillsProvider.checkPurchaseStatus', () => {
+  test('sends BILL_TSQ with our own reference as BillRequestRef', async () => {
+    mockToken();
+    axios.post.mockResolvedValueOnce({ data: { status: true, data: { finalStatus: 'Successful' } } });
+
+    await provider().checkPurchaseStatus('BILL-1');
+
+    const tsqCall = axios.post.mock.calls[1];
+    expect(tsqCall[1]).toMatchObject({
+      serviceType: 'BILL_TSQ',
+      Data: { BillRequestRef: 'BILL-1' },
+    });
+  });
+
+  test('maps finalStatus "Successful" to completed', async () => {
+    mockToken();
+    axios.post.mockResolvedValueOnce({ data: { status: true, data: { finalStatus: 'Successful' } } });
+    const result = await provider().checkPurchaseStatus('BILL-1');
+    expect(result).toEqual({ status: 'completed' });
+  });
+
+  test('maps a failed finalStatus to failed, with a reason', async () => {
+    mockToken();
+    axios.post.mockResolvedValueOnce({ data: { status: true, data: { finalStatus: 'Failed' } } });
+    const result = await provider().checkPurchaseStatus('BILL-1');
+    expect(result).toEqual({ status: 'failed', failureReason: 'Failed' });
+  });
+
+  test('treats an unrecognized or missing finalStatus as still processing, not a guess', async () => {
+    mockToken();
+    axios.post.mockResolvedValueOnce({ data: { status: true, data: { finalStatus: 'Pending' } } });
+    const result = await provider().checkPurchaseStatus('BILL-1');
+    expect(result).toEqual({ status: 'processing' });
+  });
+
+  test('treats a request-level failure as still processing rather than failing outright', async () => {
+    mockToken();
+    axios.post.mockResolvedValueOnce({ data: { status: false, message: 'Not found' } });
+    const result = await provider().checkPurchaseStatus('BILL-unknown');
+    expect(result).toEqual({ status: 'processing' });
   });
 });
 
