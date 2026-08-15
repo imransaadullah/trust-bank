@@ -101,6 +101,13 @@ Every gap/edge from `TRUSTPAY_MARKET_STRATEGY.md`, given a home. "Home" means wh
 |---|---|---|---|
 | "Live consumer product proves the rails" narrative vs. API-only competitors (Anchor, Blusalt) | None — marketing/sales | N/A | Tracked here so it isn't lost, but it's not a backlog item anyone implements — it's a claim that becomes true once Segments A–D are live and TrustPay has real volume. |
 
+### Segment I — Merchant Checkout (new domain, identified August 2026 — not started)
+
+| Item | Touches | Phase | Note |
+|---|---|---|---|
+| Hosted checkout (Squad/Paystack-Checkout-style) for a tenant's own merchants | New "Merchant Checkout" bounded context (`CORE_BANKING_PLATFORM_ARCHITECTURE.md` §3) | **Not started, not scoped into any phase yet** | Real gap: never named in the original 16 bounded contexts, surfaced only while auditing what's missing before a real deploy. **Current status, plainly:** nothing built, no code exists. A narrower version — a 3-leg Ledger journal entry (customer → merchant → platform fee), reusing `PostJournalEntry` exactly like P2P/savings do, no new service — was scoped and ready to build, but implementation was deliberately paused in favor of the fuller product: hosted payment pages/links, merchant onboarding within a tenant, merchant-facing webhooks. That fuller shape is closer to `services/payments` than `services/ledger` — it owns product-shaped concerns (sessions, webhooks, merchant records) the way Payments owns provider integration, and would most likely call the Ledger's (still-unbuilt) checkout primitive over HTTP rather than post journal entries itself. **Whether it's a new standalone service or folded into an existing one is an open decision for whenever this segment starts**, not decided now. |
+| Market positioning this unlocks | Segment G (BaaS positioning) | Tied to Segment G | Anchor/Blusalt are API-only — a bank integrates their API and builds its own payment UI on top. A hosted checkout page a tenant can hand its merchants directly (no UI to build) is a concrete product edge over that, not just "the same API but nicer" — worth stating explicitly once this ships, not before. |
+
 ### Segment H — Deliberately deferred (tracked so it isn't re-litigated)
 
 | Item | Revisit after |
