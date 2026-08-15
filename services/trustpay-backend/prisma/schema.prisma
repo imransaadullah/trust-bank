@@ -25,7 +25,7 @@ model User {
   id          String  @id @default(uuid())
   phoneNumber String  @unique @map("phone_number")
   displayName String? @map("display_name")
-  authCoreUid String? @unique @map("authcore_uid")
+  identityProviderUid String? @unique @map("identity_provider_uid")
 
   ledgerAccountId     String? @unique @map("ledger_account_id")
   ledgerAccountNumber String? @map("ledger_account_number")

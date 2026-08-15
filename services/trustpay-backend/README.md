@@ -63,14 +63,40 @@ instances during development:**
   correctly `status: 'reversed'`. The existing withdrawal/P2P/savings
   flows were re-verified unchanged after `enforceCompliance` moved out
   of `wallet.js`.
+- Identity is behind a provider abstraction (`src/identity/`), the same
+  pattern `PaymentsProvider`/`BillsProvider` already use for rails and
+  billers: a contract (`identityProvider.js`), a real implementation
+  (`authCoreProvider.js`, consolidating the former `authCoreClient.js` +
+  `authTokenVerifier.js` into one file), and an interface-only stub
+  (`twilioVerifyProvider.js`) proving the contract isn't secretly
+  AuthCore-shaped. `User.identityProviderUid` (renamed from the
+  vendor-named `authCoreUid`) is the concept, not the vendor. AuthCore is
+  the only real implementation — see "Not verified" below for what that
+  means for Twilio Verify.
+
+**Verified live end-to-end (as of the identity-provider refactor):**
+`/auth/send-otp` and `/auth/verify-otp` through the real route, with only
+`AuthCoreProvider.prototype.verifyOtp` patched to skip the outbound
+network call this environment can't reach — everything downstream of
+that boundary (user creation with `identityProviderUid`, Ledger
+wallet-open, device create-or-touch, JWT mint) ran for real against a
+live Ledger/Payments/Compliance stack: signup produced a Tier-0 wallet
+(`walletReady: true`), a repeat login with the same device correctly
+returned `isNewDevice: false`, a wrong code was correctly rejected before
+ever reaching AuthCore, and a same-session `/savings` call reached the
+Ledger for real and got back a genuine insufficient-balance error —
+confirming `requireAuth` and the rest of the stack are unaffected by the
+refactor.
 
 **Not verified — needs live credentials this environment doesn't have:**
-`/auth/send-otp` and `/auth/verify-otp` against a real AuthCore OTP
-(the account-creation and wallet-opening code downstream of a successful
-verification *was* exercised, just seeded directly rather than reached
-via a real OTP round trip), and a *successful* KYC verify/DVA
-provisioning/payout/bill-purchase (their failure paths were exercised for
-real instead — see `services/payments`' README for what that proved).
+a real AuthCore OTP round trip itself (the boundary above is exactly
+where that limitation now lives, replacing the old client-level one), a
+real Twilio Verify call (interface-proven only, not built — no second
+market exists yet to justify building it for real, same framing as
+Merchant Checkout in `COMPLIANCE_DESIGN_AND_BACKLOG.md`), and a
+*successful* KYC verify/DVA provisioning/payout/bill-purchase (their
+failure paths were exercised for real instead — see `services/payments`'
+README for what that proved).
 
 **Explicit placeholders:**
 - No retry route for a user whose signup succeeded but wallet-opening
@@ -137,13 +163,19 @@ curl -X POST localhost:8082/bills/pay -H "Authorization: Bearer $TOKEN" \
 ## Layout
 
 ```
-prisma/               User, Device, Transaction (local statement cache — the
-                       Ledger has no list-entries endpoint yet; metadata Json?
-                       holds bill_payment-specific fields like billerCode)
-src/services/          authCoreClient, authTokenVerifier (lifted from
-                       truechat/backend, JWKS-only), ledgerClient, paymentsClient,
-                       complianceClient, complianceEnforcement (enforceCompliance,
-                       shared by wallet.js and bills.js)
+prisma/               User (identityProviderUid, not authCoreUid — see
+                       src/identity/), Device, Transaction (local statement
+                       cache — the Ledger has no list-entries endpoint yet;
+                       metadata Json? holds bill_payment-specific fields
+                       like billerCode)
+src/identity/          identityProvider.js (contract), authCoreProvider.js
+                       (real, consolidates the old authCoreClient +
+                       authTokenVerifier, JWKS-only), twilioVerifyProvider.js
+                       (interface-only stub), registry.js (name -> instance,
+                       a single deploy-time IDENTITY_PROVIDER choice)
+src/services/          ledgerClient, paymentsClient, complianceClient,
+                       complianceEnforcement (enforceCompliance, shared by
+                       wallet.js and bills.js)
 src/routes/            auth, kyc, wallet, savings, bills
 src/middleware/auth.js  verifies this backend's own JWT (not AuthCore's, not
                        the Ledger's/Payments'/Compliance's operate credentials)

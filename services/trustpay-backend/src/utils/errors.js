@@ -34,4 +34,22 @@ class ComplianceDeniedError extends TrustPayError {
   }
 }
 
-module.exports = { TrustPayError, InvalidOtpError, KYCTierRequiredError, UserNotFoundError, ComplianceDeniedError };
+// Same role as services/payments' ProviderNotImplementedError — a
+// provider (identity, or any future one) that hasn't built a given
+// method yet rejects loudly instead of silently no-op-ing.
+class ProviderNotImplementedError extends TrustPayError {
+  constructor(provider, method) {
+    super(`Provider "${provider}" does not implement ${method} yet`, 'PROVIDER_NOT_IMPLEMENTED', 501);
+  }
+}
+
+class InvalidProviderError extends TrustPayError {
+  constructor(provider) {
+    super(`Unknown identity provider: ${provider}`, 'INVALID_PROVIDER', 400);
+  }
+}
+
+module.exports = {
+  TrustPayError, InvalidOtpError, KYCTierRequiredError, UserNotFoundError, ComplianceDeniedError,
+  ProviderNotImplementedError, InvalidProviderError,
+};

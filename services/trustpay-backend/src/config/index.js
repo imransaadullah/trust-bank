@@ -25,6 +25,11 @@ module.exports = {
     secret: required('TRUSTPAY_JWT_SECRET'),
     expiry: process.env.TRUSTPAY_JWT_EXPIRY || '7d',
   },
+  // A single deploy-time choice, same as tenantId — see
+  // src/identity/registry.js. 'authcore' is the only real
+  // implementation (Nigeria); 'twilio_verify' is an interface-proven
+  // stub, not built, because no second market exists to build it for yet.
+  identityProvider: process.env.IDENTITY_PROVIDER || 'authcore',
   authCore: {
     baseUrl: process.env.AUTHCORE_BASE_URL || 'https://authcore.akoti.com.ng',
     projectKey: required('AUTHCORE_PROJECT_KEY'),

@@ -1,12 +1,14 @@
 const express = require('express');
 const prisma = require('../db/prismaClient');
-const authCoreClient = require('../services/authCoreClient');
-const authTokenVerifier = require('../services/authTokenVerifier');
+const config = require('../config');
+const { getIdentityProvider } = require('../identity/registry');
 const jwtService = require('../services/jwtService');
 const ledgerClient = require('../services/ledgerClient');
 const logger = require('../utils/logger');
 
 const router = express.Router();
+
+const identityProvider = getIdentityProvider(config.identityProvider, config.authCore);
 
 router.post('/send-otp', async (req, res, next) => {
   try {
@@ -14,7 +16,7 @@ router.post('/send-otp', async (req, res, next) => {
     if (!phone) {
       return res.status(400).json({ success: false, error: 'phone is required' });
     }
-    await authCoreClient.sendPhoneOtp(phone);
+    await identityProvider.sendOtp(phone);
     res.json({ success: true });
   } catch (err) {
     next(err);
@@ -28,9 +30,8 @@ router.post('/verify-otp', async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'phone, code, and deviceId are required' });
     }
 
-    const { access_token: accessToken } = await authCoreClient.verifyPhoneOtp(phone, code);
-    const verified = await authTokenVerifier.verifyAuthCoreToken(accessToken);
-    if (!verified.phoneVerified || verified.phoneNumber !== phone) {
+    const verified = await identityProvider.verifyOtp(phone, code);
+    if (!verified.verified || verified.phoneNumber !== phone) {
       return res.status(401).json({ success: false, error: 'Phone verification failed' });
     }
 
@@ -38,7 +39,7 @@ router.post('/verify-otp', async (req, res, next) => {
 
     if (!user) {
       user = await prisma.user.create({
-        data: { phoneNumber: phone, authCoreUid: verified.providerUid },
+        data: { phoneNumber: phone, identityProviderUid: verified.providerUid },
       });
 
       try {
