@@ -101,7 +101,16 @@ Every gap/edge from `TRUSTPAY_MARKET_STRATEGY.md`, given a home. "Home" means wh
 |---|---|---|---|
 | "Live consumer product proves the rails" narrative vs. API-only competitors (Anchor, Blusalt) | None — marketing/sales | N/A | Tracked here so it isn't lost, but it's not a backlog item anyone implements — it's a claim that becomes true once Segments A–D are live and TrustPay has real volume. |
 
-### Segment I — Merchant Checkout (new domain, identified August 2026 — not started)
+### Segment I — Merchant Checkout (new domain, identified August 2026 — not started, deliberately deprioritized)
+
+**Why this isn't being worked on:** the BaaS-reseller line of business itself is still pending
+— TrustPay is trust-bank's only real tenant today, and TrustPay is a consumer product, not a
+bank/MFB reseller customer. Merchant Checkout's entire value case is "something a tenant hands
+*their* merchants" — there's no real tenant in that shape to build it for yet. Revisit once an
+actual BaaS-reseller tenant (a bank/MFB buying trust-bank as infrastructure) exists, not before
+— building this speculatively ahead of that customer would be the same mistake as building a
+live sanctions feed or a full credit-scoring model before there's a reason to carry the
+maintenance cost.
 
 | Item | Touches | Phase | Note |
 |---|---|---|---|
