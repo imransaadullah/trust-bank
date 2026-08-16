@@ -43,6 +43,16 @@ instances during development:**
   a transfer from a user whose `displayName` matched a seeded sanctions
   entry was rejected with `COMPLIANCE_DENIED` before the Ledger was ever
   called — confirmed by checking the sender's balance was untouched
+- `User.verifiedFullName` — populated from `services/payments`' BVN/NIN
+  `verifyIdentity` call's `matchedName` at Tier-1 verification, screened
+  instead of the self-reported `displayName` whenever it's set (falls
+  back to `displayName` for a Tier-0 user who hasn't verified). Verified
+  live against `services/compliance`'s real, currently-ingested OFAC/UN/
+  Nigeria sanctions data (see that service's README) — a user whose
+  verified name matched a real entry was blocked even though their
+  display name didn't, and the real `/kyc/verify-identity` route was
+  confirmed to persist the provider's own matched name, not the
+  request's own `firstName`/`lastName`
 - Savings, via the Ledger's `internal/wallet/savings.go` and
   `internal/accrual` directly (`/savings` here is a thin pass-through —
   see `services/ledger`'s README for what was verified live: open/fund,

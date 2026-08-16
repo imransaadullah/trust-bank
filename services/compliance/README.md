@@ -82,21 +82,60 @@ trustpay-backend chain:**
   and a tenant-A credential is rejected with 403 when a request's
   `:tenantId` claims tenant B.
 
-**Two honest limitations, not glossed over:**
-- **The sanctions watchlist is seed data (`prisma/seed.js`), not a live
-  feed.** There's no OFAC/UN/EU ingestion here — that's real, separate
-  work (fetch, parse, diff, re-import on a schedule). What's real is the
-  schema, the matching algorithm (exact + small-edit-distance against
-  name and aliases), and the API contract. `listSource: "SEED_TEST_DATA"`
-  on every seeded row says so plainly, same as `selfIssuedNuban.js` in
-  `services/payments` is documented as a stub rather than a real bank.
-- **Sanctions screening runs against unverified names.** Today that's
-  `User.displayName` (self-reported) and, for a withdrawal, the request
-  body's `beneficiaryName` (also unverified) — `services/payments`'
-  BVN/NIN `verifyIdentity` call returns a `matchedName` but nothing
-  persists it anywhere in this codebase, so there's no verified legal
-  name to screen against yet. Worth fixing before this matters for real,
-  not assumed away.
+**The sanctions watchlist is real now, from three independently-verified
+sources — `src/services/sanctionsFeedService.js`:**
+- **OFAC's SDN list** (`sanctionslistservice.ofac.treas.gov`, free, no
+  auth) — 19,199 entries plus aliases, refreshed daily
+  (`sanctionsFeedRunner.js`, `SANCTIONS_FEED_POLL_INTERVAL_HOURS`,
+  default 24h).
+- **The UN Security Council Consolidated List**
+  (`scsanctions.un.org`, free, no auth) — 1,011 entries, including
+  aliases and date of birth where the source has it.
+- **Nigeria's own Sanctions Committee list** (`nigsac.gov.ng`) — 69
+  entries (individuals + entities). No API or export exists for this
+  one, only an HTML table — scraped with `cheerio`, and honestly more
+  fragile than the two above: a government webpage can change markup
+  with no warning, unlike a purpose-built CSV/XML export. Treat it
+  accordingly, not as equally durable.
+
+Each source replaces its own rows wholesale on every run (`listSource`
+distinguishes `OFAC_SDN`/`UN_CONSOLIDATED`/`NG_SANCTIONS_COMMITTEE`) —
+correctly drops delisted entries instead of letting them accumulate
+forever. One source failing doesn't block the others. `scripts/
+refreshSanctionsFeed.js` triggers a manual run — deliberately a
+locally-run script, not an HTTP route: the watchlist has no `tenantId`
+(sanctions apply platform-wide), so there's no tenant admin credential
+that should gate a platform-wide refresh.
+
+Verified live against the real sources during this feature's own
+build — not a fixture: real entries landed with correct names/aliases/
+dates, a second run replaced cleanly with no duplicates, and
+`screenSanctions`'s existing fuzzy matcher correctly caught a real
+1-character alias variant already present in OFAC's own data (an
+unrelated-looking name match turned out to be a real documented alias,
+not a bug — checked before assuming otherwise).
+
+**Sanctions screening now runs against a verified name when one
+exists.** `services/trustpay-backend`'s `User.verifiedFullName` is
+populated from `services/payments`' BVN/NIN `verifyIdentity` call's
+`matchedName` at Tier-1 verification — `complianceEnforcement.js`
+prefers it over the self-reported `displayName`, falling back only for
+a Tier-0 user who hasn't verified yet. Verified live: a user whose
+verified name matched a real ingested sanctions entry was blocked even
+though their (harmless) display name wasn't; a user with no verified
+name correctly fell back to screening the self-reported one instead of
+being exempted.
+
+**A real bug this surfaced, fixed before it shipped:** `setInterval`
+silently overflows past ~24.8 days (2^31-1 ms, a 32-bit signed int
+internally) and fires almost immediately instead of waiting — not an
+error, just wrong behavior. An intentionally-extreme test value for
+`SANCTIONS_FEED_POLL_INTERVAL_HOURS` turned the runner into a tight
+loop hammering OFAC/UN/Nigeria's real servers before this was caught
+and stopped. `src/config/index.js` now clamps any hours-based polling
+interval to a safe maximum (500h) — the same class of bug would have
+hit a perfectly reasonable "check monthly" setting (~730h) in
+production, not just an extreme test value.
 
 **Explicit placeholder:** no mTLS — see the Ledger's README and
 `../../deploy/NETWORK_TOPOLOGY.md`. The `cases` review routes require an
@@ -192,14 +231,20 @@ prisma/               KYCTierPolicy, DeviceBindingPolicy, TransactionMonitoringP
                        immutable, versioned rows. SanctionsWatchlistEntry (not
                        tenant-scoped), ComplianceCase — the service's first persisted
                        state beyond policy, an audit trail, not per-user decision input.
-prisma/seed.js         synthetic sanctions-watchlist test entries — not a live feed
+prisma/seed.js         synthetic sanctions-watchlist test entries — a dev-time fallback;
+                       sanctionsFeedService.js's real ingestion is what actually populates
+                       this table outside local development
 scripts/bootstrapKey.js  issues the first admin credential for a fresh tenant
+scripts/refreshSanctionsFeed.js  manual on-demand sanctions-feed refresh — not an HTTP
+                                  route, see sanctionsFeedService.js's own comment on why
 src/services/
   policyService.js             KYC-tier + device-binding: publish + "current effective" lookup
   monitoringPolicyService.js    same pattern, for TransactionMonitoringPolicy
   decisionService.js            pure policy math over caller-supplied facts (KYC-tier, device)
   screeningService.js           screenTransaction (flags), screenSanctions (blocks),
                                  listCases/reviewCase — rule-based, ML-ready contract
+  sanctionsFeedService.js       real OFAC/UN/Nigeria ingestion — see "sanctions watchlist" above
+  sanctionsFeedRunner.js         daily background refresh, same shape as Payments' own runners
   credentialService.js          scoped/revocable API credentials — see ../../SERVICE_CREDENTIAL_MODEL.md
 src/routes/
   policies.js            admin: publish a KYC-tier or device policy version

@@ -33,6 +33,12 @@ model User {
   kycTier       Int       @default(0) @map("kyc_tier")
   kycStatus     String    @default("not_started") @map("kyc_status") // not_started | pending | verified | rejected
   bvnVerifiedAt DateTime? @map("bvn_verified_at")
+  // The provider's own matched name from BVN/NIN verification
+  // (PaymentsProvider.verifyIdentity's matchedName) — screened against
+  // sanctions instead of the self-reported displayName once set, since
+  // it's actually been checked against a government identity record.
+  // Null until Tier-1 verification succeeds.
+  verifiedFullName String? @map("verified_full_name")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

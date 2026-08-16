@@ -30,9 +30,16 @@ router.post('/verify-identity', requireAuth, async (req, res, next) => {
       externalCustomerId: user.id, firstName, lastName, phoneNumber: user.phoneNumber,
     });
 
+    // matchedName is the provider's own match, present whenever it
+    // returned actual name strings rather than a boolean match flag
+    // (see PaystackProvider.verifyIdentity) — fall back to what the
+    // caller supplied only if the provider didn't return one, so this
+    // is never left null on a real, successful verification.
+    const verifiedFullName = identity.matchedName || `${firstName} ${lastName}`;
+
     const updated = await prisma.user.update({
       where: { id: user.id },
-      data: { kycTier: 1, kycStatus: 'verified', bvnVerifiedAt: new Date() },
+      data: { kycTier: 1, kycStatus: 'verified', bvnVerifiedAt: new Date(), verifiedFullName },
     });
 
     res.json({

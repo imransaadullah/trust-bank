@@ -44,10 +44,15 @@ async function recentTransactionsForMonitoring(userId) {
 // fully-verified Tier 3 accounts."
 // counterpartyId/transactionRef feed transaction monitoring's velocity/
 // structuring rules; namesToScreen feeds sanctions screening — the
-// sender's own displayName always, plus (for a withdrawal or bill
-// payment) the external beneficiary/biller-customer name where known.
-// Monitoring flags but never blocks (see services/compliance's
-// screeningService.js); a sanctions hit does.
+// sender's own verified name (from Tier-1 BVN/NIN verification,
+// User.verifiedFullName) when there is one, since that's actually been
+// checked against a government identity record and not just typed in;
+// falls back to the self-reported displayName for a Tier-0 user who
+// hasn't verified yet — screening something unverified still beats
+// screening nothing. Plus (for a withdrawal or bill payment) the
+// external beneficiary/biller-customer name where known. Monitoring
+// flags but never blocks (see services/compliance's screeningService.js);
+// a sanctions hit does.
 async function enforceCompliance({ user, deviceId, amount, counterpartyId, transactionRef, namesToScreen = [] }) {
   if (user.kycTier >= 1) {
     const spentToday = await amountTransactedTodayKobo(user.id);
@@ -71,7 +76,7 @@ async function enforceCompliance({ user, deviceId, amount, counterpartyId, trans
     userId: user.id, amount, counterpartyId, recentTransactions, transactionRef,
   });
 
-  const namesToCheck = [user.displayName, ...namesToScreen].filter(Boolean);
+  const namesToCheck = [user.verifiedFullName || user.displayName, ...namesToScreen].filter(Boolean);
   for (const fullName of namesToCheck) {
     const sanctionsDecision = await complianceClient.screenSanctions({ userId: user.id, fullName });
     if (sanctionsDecision.hit) throw new ComplianceDeniedError('Transaction blocked by sanctions screening');
