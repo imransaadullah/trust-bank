@@ -3,6 +3,9 @@ Description=trust-bank Core Ledger Service
 Documentation=https://github.com/imransaadullah/trust-bank
 After=network.target postgresql.service
 Wants=postgresql.service
+# Fires once systemd gives up retrying (past Restart=always's default
+# burst limit), not on every transient crash — see deploy/notify-failure.sh.
+OnFailure=trustbank-notify-failure@%n.service
 
 [Service]
 Type=exec

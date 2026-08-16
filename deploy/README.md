@@ -11,7 +11,11 @@ the terminal). `install.sh` and `provision-tenant.sh` replace that.
 ```
 install.sh              # fresh Ubuntu box -> all four services built, migrated, running
 provision-tenant.sh     # onboard a tenant onto an already-installed box
-lib/common.sh            # shared bash helpers, sourced by both scripts
+backup.sh                # dump all 4 DBs, upload to S3-compatible storage, prune by retention
+restore.sh               # download a backup and restore it — real DR, and rehearsing one
+notify-failure.sh        # generic webhook POST, invoked by systemd on any service failure
+backup.env.example       # S3 + webhook config — copied to backup.env on first install, never overwritten
+lib/common.sh            # shared bash helpers, sourced by every script above
 templates/               # systemd unit templates, rendered by install.sh — not checked-in static units
 Caddyfile.example        # reverse proxy config for the SaaS/single-VPS topology (see ../NETWORK_TOPOLOGY.md)
 ```
@@ -92,6 +96,40 @@ script — that's real vendor credentials (a Paystack secret key, or eventually 
 own NUBAN/NIBSS setup) with no sensible default to generate. See `services/payments/README.md`
 for `POST /v1/tenants/:id/config`.
 
+## Backups and crash monitoring
+
+Scoped deliberately for pre-launch, single-tenant, single-VPS volume — not the multi-region
+HA/DR posture `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §8 describes for real institutional volume
+(Patroni, a replicated broker, chaos testing). That's premature until there's real volume to
+justify the operational burden, same reasoning already applied to mTLS, a live sanctions feed,
+and Merchant Checkout. What's built instead:
+
+- **`backup.sh`**, run daily by `trustbank-backup.timer` (installed and enabled by `install.sh`,
+  inert until `deploy/backup.env` has real credentials): `pg_dump`s all four databases (custom
+  format) plus a `pg_dumpall --globals-only` for role definitions, uploads each to any
+  S3-compatible endpoint (AWS S3, Backblaze B2, DigitalOcean Spaces, Cloudflare R2, MinIO — all
+  speak the same API via `--endpoint-url`), and prunes anything older than
+  `BACKUP_RETENTION_DAYS` (default 14).
+- **`restore.sh <db-name> [backup-name|latest] [--target-db <name>]`** — downloads a backup and
+  `pg_restore`s it. Defaults to a `<db-name>_restore_test` database, never the live one, so
+  running this to *rehearse* a restore can't accidentally clobber production — pass `--target-db`
+  explicitly for a real recovery. §8's own words are the reason this script exists at all: "we
+  have backups is not a DR plan until you've timed a restore."
+- **`notify-failure.sh`**, wired via `OnFailure=trustbank-notify-failure@%n.service` on all four
+  service units — posts a plain JSON webhook (Slack, Discord, most incident tools accept this
+  with no vendor-specific code) when systemd gives up restarting a crashed service (past
+  `Restart=always`'s default burst limit — not on every transient blip). Covers all four
+  services, including the three that are loopback-only and unreachable from outside.
+- **External uptime check — documented, not built.** `OnFailure=` only sees a process crash; a
+  healthy `trustpay-backend` behind a dead reverse proxy still looks "fine" to systemd. Point any
+  third-party uptime monitor's free tier (UptimeRobot, healthchecks.io) at
+  `https://<your-domain>/health` — a five-minute signup, not something worth writing bespoke
+  polling infrastructure to reinvent.
+
+Configure real credentials in `deploy/backup.env` (copied from `backup.env.example` on first
+install, never overwritten afterward), then rehearse a restore before trusting any of this:
+`./restore.sh trust_bank_ledger`.
+
 ## What's verified, and what isn't
 
 **Live-verified** against a real throwaway Postgres stack, the same way every other pass in this
@@ -111,11 +149,26 @@ started; the second was only caught by actually calling the decision endpoint fo
 after publishing its policy, not by reading the code — exactly the case for closing the loop
 instead of stopping at "the scripts ran without error."
 
+**Also live-verified:** `backup.sh`/`restore.sh`'s actual `pg_dump -Fc` → `pg_restore` round trip
+— the part genuinely risky to get wrong — using the exact same invocations both scripts
+construct: a source database with 3 known rows (sum `1,500,000`) round-tripped through dump,
+gzip, restore into a fresh database, and came back byte-identical — same row count, same sum,
+same IDs/values/description text. `pg_dumpall --globals-only` was checked separately and
+correctly captures a role's full attributes and password hash. `notify-failure.sh` was run
+unmodified against a real local HTTP listener standing in for a webhook endpoint — correct
+payload delivered on success, and both the "no webhook configured" and "webhook unreachable"
+paths log a warning and exit 0 rather than crashing or looping.
+
 **Not verified, and said so plainly rather than claimed otherwise:** the `apt-get`
-system-dependency installation and the actual `systemctl`/Caddy steps in `install.sh`. This repo
-was built on a macOS dev machine with no systemd and no Docker available — there is no way to
-execute those specific code paths in this environment. They're correct as written against each
-tool's own documented usage (Go's official tarball install, nvm's standard installer, Caddy's
-official apt repo), and the systemd *templating* itself is verified (rendered output checked
-against the corrected, generically-named units). Treat the first real run on an actual VPS as the
-actual test of the system-dependency and systemd-install steps specifically.
+system-dependency installation (now including `awscli`) and the actual `systemctl`/Caddy/timer
+steps in `install.sh` — including the `OnFailure=` wiring and `trustbank-backup.timer` actually
+firing on schedule. This repo was built on a macOS dev machine with no systemd and no Docker
+available — there is no way to execute those specific code paths here. They're correct as written
+against each tool's own documented usage (Go's official tarball install, nvm's standard
+installer, Caddy's official apt repo, systemd's standard `OnFailure=`/timer idioms), and the
+systemd *templating* itself is verified (rendered output checked against the corrected,
+generically-named units). The real S3-compatible upload/download in `backup.sh`/`restore.sh` is
+also unverified here — no bucket credentials exist in this environment; only the
+dump/restore-file mechanics either side of that upload were exercised. Treat the first real run
+on an actual VPS as the actual test of the system-dependency, systemd-install, and real-bucket
+steps specifically.

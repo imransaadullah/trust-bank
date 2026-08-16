@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily trust-bank database backup
+Documentation=https://github.com/imransaadullah/trust-bank
+
+[Timer]
+OnCalendar=daily
+# Runs the missed backup on next boot if the box was off when this would
+# have fired — a solo-operated single VPS is exactly the case this
+# matters for.
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

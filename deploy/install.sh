@@ -80,6 +80,9 @@ install_system_deps() {
     sudo apt-get update -y
     sudo apt-get install -y caddy
   fi
+
+  # For backup.sh/restore.sh — any S3-compatible endpoint via --endpoint-url.
+  have_cmd aws || { log "Installing awscli"; sudo apt-get install -y awscli; }
 }
 
 # ---------------------------------------------------------------------------
@@ -188,17 +191,42 @@ setup_node_service() {
 }
 
 # ---------------------------------------------------------------------------
+# 4b. backup.env — first run only, never overwritten (holds real S3 +
+#     webhook credentials the operator fills in after install).
+# ---------------------------------------------------------------------------
+setup_backup_env() {
+  local env_file="$SCRIPT_DIR/backup.env"
+  if [ ! -f "$env_file" ]; then
+    log "Creating deploy/backup.env from backup.env.example — fill in real credentials before backups/notifications work"
+    cp "$SCRIPT_DIR/backup.env.example" "$env_file"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # 5. systemd units — rendered from deploy/templates/, not checked in static
 # ---------------------------------------------------------------------------
 install_systemd_units() {
   log "Installing systemd units"
   local tmp; tmp="$(mktemp -d)"
   local unit
+
   for unit in trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend; do
     render_template "$SCRIPT_DIR/templates/${unit}.service.tmpl" "$tmp/${unit}.service" \
       "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
     sudo cp "$tmp/${unit}.service" "/etc/systemd/system/${unit}.service"
   done
+
+  render_template "$SCRIPT_DIR/templates/trustbank-backup.service.tmpl" "$tmp/trustbank-backup.service" \
+    "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
+  sudo cp "$tmp/trustbank-backup.service" /etc/systemd/system/trustbank-backup.service
+  sudo cp "$SCRIPT_DIR/templates/trustbank-backup.timer.tmpl" /etc/systemd/system/trustbank-backup.timer
+
+  # Instantiated on demand by other units' OnFailure=, never enabled/started
+  # directly — install the template unit itself, that's all it needs.
+  render_template "$SCRIPT_DIR/templates/trustbank-notify-failure@.service.tmpl" "$tmp/trustbank-notify-failure@.service" \
+    "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
+  sudo cp "$tmp/trustbank-notify-failure@.service" "/etc/systemd/system/trustbank-notify-failure@.service"
+
   rm -rf "$tmp"
 
   sudo systemctl daemon-reload
@@ -206,6 +234,10 @@ install_systemd_units() {
     sudo systemctl enable "$unit"
     sudo systemctl restart "$unit"
   done
+  # The timer, not the backup service itself — running backup.sh now would
+  # just fail until backup.env has real credentials in it, which is
+  # expected on a fresh install (see setup_backup_env's log line above).
+  sudo systemctl enable --now trustbank-backup.timer
 }
 
 # ---------------------------------------------------------------------------
@@ -228,6 +260,7 @@ main() {
   setup_node_service payments trustbank_payments
   setup_node_service compliance trustbank_compliance
   setup_node_service trustpay-backend trustpay_backend
+  setup_backup_env
   install_systemd_units
   setup_caddy
 
@@ -242,6 +275,14 @@ Next steps:
      TENANT_ID / LEDGER_API_KEY / PAYMENTS_API_KEY / COMPLIANCE_API_KEY.
   3. Payments' TenantProviderConfig (Paystack/self-issued-NUBAN credentials)
      is set up per-tenant via its own API — see services/payments/README.md.
+  4. Fill in deploy/backup.env (S3-compatible bucket + credentials, a
+     webhook URL for crash notifications) — daily backups and failure
+     alerts are installed but inert until it's configured. Then rehearse
+     a restore: deploy/restore.sh <db-name> — see deploy/README.md.
+  5. Set up an external uptime monitor (UptimeRobot, healthchecks.io, etc.)
+     pinging https://<your-domain>/health — the one check that catches
+     trustpay-backend being unreachable from outside, which systemd alone
+     can't see.
 EOF
 }
 

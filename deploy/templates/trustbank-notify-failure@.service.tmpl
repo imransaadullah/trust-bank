@@ -1,0 +1,13 @@
+[Unit]
+Description=Notify on failure of %i
+Documentation=https://github.com/imransaadullah/trust-bank
+
+[Service]
+Type=oneshot
+User={{DEPLOY_USER}}
+Group={{DEPLOY_USER}}
+WorkingDirectory={{APP_ROOT}}/deploy
+ExecStart={{APP_ROOT}}/deploy/notify-failure.sh %i
+
+StandardOutput=journal
+StandardError=journal
