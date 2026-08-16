@@ -181,10 +181,24 @@ setup_node_service() {
   if [ "$first_run" -eq 1 ]; then
     case "$name" in
       payments)
-        env_file_set PAYMENTS_ENCRYPTION_KEY "$(gen_secret)" "$env_file"
+        # PAYMENTS_ENCRYPTION_KEY encrypts TenantProviderConfig.encryptedCredentials
+        # at rest — losing it doesn't mean "generate a new one," it means
+        # every tenant's provider credentials become permanently unreadable.
+        # Captured in $SECRETS_DIR/critical-secrets.env too, not just this
+        # .env, so it isn't the box's only copy — see deploy/README.md's
+        # disaster-recovery section for why, and what still has to happen
+        # manually (copying it somewhere durable off-box).
+        local payments_key; payments_key="$(gen_secret)"
+        env_file_set PAYMENTS_ENCRYPTION_KEY "$payments_key" "$env_file"
+        capture_critical_secret payments PAYMENTS_ENCRYPTION_KEY "$payments_key"
         ;;
       trustpay-backend)
-        env_file_set TRUSTPAY_JWT_SECRET "$(gen_secret)" "$env_file"
+        # Lower stakes than the key above — losing this only invalidates
+        # existing sessions, nobody loses data — but capturing it costs
+        # nothing and saves a forced mass re-login after a real disaster.
+        local jwt_secret; jwt_secret="$(gen_secret)"
+        env_file_set TRUSTPAY_JWT_SECRET "$jwt_secret" "$env_file"
+        capture_critical_secret trustpay-backend TRUSTPAY_JWT_SECRET "$jwt_secret"
         ;;
     esac
   fi
@@ -283,6 +297,11 @@ Next steps:
      pinging https://<your-domain>/health — the one check that catches
      trustpay-backend being unreachable from outside, which systemd alone
      can't see.
+  6. IMPORTANT — copy $SECRETS_DIR/critical-secrets.env somewhere durable
+     and off this box RIGHT NOW (a password manager, a secrets tool). It
+     holds PAYMENTS_ENCRYPTION_KEY — lose this box without a copy of that
+     key elsewhere and every tenant's provider credentials become
+     permanently unreadable, even with a perfect database restore.
 EOF
 }
 

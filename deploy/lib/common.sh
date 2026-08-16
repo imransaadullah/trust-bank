@@ -11,6 +11,12 @@ die()  { printf '\033[1;31mERROR:\033[0m %s\n' "$*" >&2; exit 1; }
 # single-VPS model. Override if it's ever not on the default port.
 PG_PORT="${PG_PORT:-5432}"
 
+# Where every script in this directory keeps local, never-auto-uploaded
+# state — bootstrap tokens, the Postgres superuser password, and (see
+# capture_critical_secret below) durable copies of secrets whose loss
+# means data loss, not just "regenerate it."
+SECRETS_DIR="${SECRETS_DIR:-$HOME/.trustbank}"
+
 # Usage: have_cmd node
 have_cmd() { command -v "$1" >/dev/null 2>&1; }
 
@@ -39,6 +45,24 @@ env_file_set() {
   else
     printf '%s=%s\n' "$key" "$value" >> "$file"
   fi
+}
+
+# Usage: capture_critical_secret payments PAYMENTS_ENCRYPTION_KEY "$value"
+# Appends to $SECRETS_DIR/critical-secrets.env — the durable copy of any
+# secret whose loss isn't just "generate a new one" but "some already-
+# encrypted data becomes permanently unreadable" (see deploy/README.md's
+# disaster-recovery section). Not auto-uploaded anywhere by this repo's
+# own code — deliberately: a key living right next to the ciphertext it
+# protects, in the same backup blast radius, defeats the point of it
+# being separate. The operator copies this file off-box (a password
+# manager, a secrets tool) themselves; this only guarantees it's captured
+# in ONE place outside the service's own .env, not that it's durable yet.
+capture_critical_secret() {
+  local service="$1" key="$2" value="$3"
+  local file="$SECRETS_DIR/critical-secrets.env"
+  mkdir -p "$SECRETS_DIR" && chmod 700 "$SECRETS_DIR"
+  [ -f "$file" ] || { touch "$file"; chmod 600 "$file"; }
+  env_file_set "${service}_${key}" "$value" "$file"
 }
 
 # Usage: extract_token "$command_output" lgr_live   (prefix, no trailing _)

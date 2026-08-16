@@ -185,23 +185,22 @@ incident.
    databases `install.sh` just created — there's nothing to drop, so it just creates everything.)
 4. `sudo systemctl start trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend`
 
-**What this sequence does not recover, and backup.sh does not capture at all:**
-`PAYMENTS_ENCRYPTION_KEY` lives only in `services/payments/.env`, never in the database — but
-Payments' `TenantProviderConfig.encryptedCredentials` (a tenant's Paystack/self-issued-NUBAN
-secret key) was encrypted *with* it. `install.sh` generating a *new* key on the new box means the
-restored, encrypted rows in that table become permanently undecryptable — not corrupted data,
-just unreadable with the new key. The same problem applies with lower stakes to
-`TRUSTPAY_JWT_SECRET` (a new one just invalidates existing sessions; nobody loses money over it,
-they just have to log back in).
+**A secret `backup.sh` deliberately never captures:** `PAYMENTS_ENCRYPTION_KEY` lives only in
+`services/payments/.env`, never in the database — but Payments' `TenantProviderConfig
+.encryptedCredentials` (a tenant's Paystack/self-issued-NUBAN secret key) was encrypted *with* it.
+`install.sh` generating a *new* key on a new box means the restored, encrypted rows become
+permanently undecryptable — not corrupted, just unreadable with the new key. It's deliberately
+kept out of the S3-uploaded database dumps — a key living right next to the ciphertext it
+protects, in the same backup's blast radius, defeats the point of it being separate.
 
-There's no code fix for this in the current pass — extending `backup.sh` to also capture
-service-level secrets is a real design decision (storing an encryption key anywhere near the data
-it protects is its own anti-pattern, S3-bucket or not) that deserves its own conversation rather
-than folding in silently here. Until that's decided: **store `services/payments/.env`'s
-`PAYMENTS_ENCRYPTION_KEY` somewhere durable and separate from the database backups** — a password
-manager, a secrets manager, anything that isn't "only ever existed on the box that just died." Losing it means every tenant has to re-enter their provider credentials from scratch after a real
-disaster — recoverable, but disruptive, and avoidable for the cost of copying one value somewhere
-safe today.
+Instead, `install.sh` captures it (and `TRUSTPAY_JWT_SECRET`, lower stakes — a new one only
+forces re-login, no data is lost) into `$SECRETS_DIR/critical-secrets.env`
+(`~/.trustbank/critical-secrets.env` by default) the moment either is first generated —
+`lib/common.sh`'s `capture_critical_secret`. That file is **not** uploaded anywhere by this
+repo's own code, on purpose: **copy it to a password manager or secrets tool immediately after
+first install** (`install.sh`'s own final output says this loudly). This guarantees the value
+exists in one place outside the box that might die, not that it's durable yet — that last step is
+still yours.
 
 ## What's verified, and what isn't
 
@@ -230,7 +229,11 @@ same IDs/values/description text. `pg_dumpall --globals-only` was checked separa
 correctly captures a role's full attributes and password hash. `notify-failure.sh` was run
 unmodified against a real local HTTP listener standing in for a webhook endpoint — correct
 payload delivered on success, and both the "no webhook configured" and "webhook unreachable"
-paths log a warning and exit 0 rather than crashing or looping.
+paths log a warning and exit 0 rather than crashing or looping. `capture_critical_secret` was
+verified against a real first-run/rerun cycle: `PAYMENTS_ENCRYPTION_KEY`/`TRUSTPAY_JWT_SECRET`
+land in `critical-secrets.env` with values matching each service's own `.env` exactly, file
+permissions come out `600`, and a rerun (idempotent — secrets already exist) doesn't touch or
+duplicate the captured values.
 
 **Not verified, and said so plainly rather than claimed otherwise:** the `apt-get`
 system-dependency installation (now including `awscli`) and the actual `systemctl`/Caddy/timer
