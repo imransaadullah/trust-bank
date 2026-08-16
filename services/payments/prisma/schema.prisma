@@ -112,6 +112,26 @@ model ApiCredential {
 }
 
 // ============================================
+// TENANT LEDGER CREDENTIAL
+// The operate-scope Ledger credential Payments itself uses to call the
+// Ledger on a given tenant's behalf (confirmDeposit, reverseJournalEntry
+// — see src/services/ledgerClient.js). One row per tenant, not a single
+// shared secret: the Ledger cross-checks the X-Tenant-Id header against
+// the credential's own bound tenant, so a single global credential can
+// only ever work for one tenant at a time. Encrypted the same way
+// TenantProviderConfig's own provider credentials are.
+// ============================================
+model TenantLedgerCredential {
+  id             String   @id @default(uuid())
+  tenantId       String   @unique @map("tenant_id")
+  encryptedToken String   @map("encrypted_token")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("tenant_ledger_credentials")
+}
+
+// ============================================
 // TENANT BILLS PROVIDER CONFIG
 // Sibling to TenantProviderConfig, deliberately not merged into it — that
 // table is @unique on tenantId alone (one payment-rail config per

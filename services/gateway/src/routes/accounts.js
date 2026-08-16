@@ -4,11 +4,12 @@
 // duplicate it.
 const express = require('express');
 const { requireApiKey } = require('../middleware/auth');
+const { resolveEffectiveTenant } = require('../middleware/resolveEffectiveTenant');
 const { proxyRoute } = require('./proxyHelper');
 
 const router = express.Router();
 const BANKING_TIERS = ['sandbox', 'production'];
-const auth = requireApiKey({ allowedTiers: BANKING_TIERS });
+const auth = [requireApiKey({ allowedTiers: BANKING_TIERS }), resolveEffectiveTenant];
 
 router.post('/:tenantId/accounts', auth,
   proxyRoute('ledger', 'POST', () => '/v1/accounts', { statusCode: 201 }));

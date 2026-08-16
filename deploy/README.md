@@ -34,9 +34,7 @@ cd trust-bank/deploy
 ./install.sh
 
 ./provision-tenant.sh --slug trustpay --name "TrustPay" --license-type OTHER \
-  --product-backend-env /home/ubuntu/trust-bank/services/trustpay-backend/.env \
-  --payments-env /home/ubuntu/trust-bank/services/payments/.env
-sudo systemctl restart trustbank-payments
+  --product-backend-env /home/ubuntu/trust-bank/services/trustpay-backend/.env
 
 # trustpay-backend still needs real AuthCore credentials before it stays up —
 # edit services/trustpay-backend/.env: AUTHCORE_PROJECT_KEY, AUTHCORE_JWKS_URL, AUTHCORE_PROJECT_ID
@@ -76,20 +74,29 @@ A second bank tenant on the same box, once it has its own product backend deploy
    tenant, via each service's own bootstrap tool (`cmd/bootstrap-key`, `scripts/bootstrapKey.js`)
    — the same tools `SERVICE_CREDENTIAL_MODEL.md` documents running by hand. This includes a
    *second*, separate Ledger operate credential specifically for Payments' own settlement calls
-   (`services/payments/src/services/ledgerClient.js` — required for Payments to even boot), not
-   just the product backend's. **Known limitation:** Payments holds this as a single global
-   `LEDGER_API_KEY` in its own `.env`, so it's only correct for one tenant at a time — running
-   `--payments-env` again for a second tenant would overwrite the first tenant's credential and
-   break its settlement calls. That's a gap in Payments' credential model, not something this
-   script papers over; omit `--payments-env` for any tenant after the first until it's addressed.
-4. Publishes a default KYC-tier-0/tier-1 + device-binding compliance policy, using the same
+   (`services/payments/src/services/ledgerClient.js` — required to confirm deposits/reversals),
+   plus a third set of Ledger/Payments/Compliance operate credentials for the gateway
+   (`services/gateway` — the public API for external bank/developer integration), stored
+   encrypted in the gateway's own database via `POST /v1/tenants/:id/backend-credentials`, not a
+   shared `.env`.
+4. Stores this tenant's Ledger credential in Payments per-tenant
+   (`POST /v1/tenants/:id/ledger-credential`) rather than a shared `.env` value — the Ledger
+   cross-checks `X-Tenant-Id` against the credential's own bound tenant, so a single global
+   credential could only ever work for one tenant; this is what makes provisioning more than one
+   tenant on the same box (including the sandbox twin below) safe.
+5. Publishes a default KYC-tier-0/tier-1 + device-binding compliance policy, using the same
    numbers already documented in `services/compliance/README.md`'s examples (CBN Tier-1: NGN
    30,000/day).
-5. Writes `TENANT_ID`/`LEDGER_API_KEY`/`PAYMENTS_API_KEY`/`COMPLIANCE_API_KEY` straight into the
+6. Writes `TENANT_ID`/`LEDGER_API_KEY`/`PAYMENTS_API_KEY`/`COMPLIANCE_API_KEY` straight into the
    target product backend's `.env` (or prints them if `--product-backend-env` is omitted) — this
    is the step that actually removes risk from the old process: today the only way these
    shown-once tokens get captured is a human copy-pasting from a terminal wall of text across
    three separate services; the script captures each one programmatically instead.
+7. Provisions a synthetic **sandbox twin** for the tenant — a second, fully isolated tenant in
+   Ledger/Payments/Compliance, using the exact same steps above a second time — and registers it
+   with the gateway (`POST /v1/tenants/:id/sandbox`). The starter sandbox-tier API key printed at
+   the end resolves to this twin, not the tenant's real data — see
+   `services/gateway/README.md`.
 
 A Paystack/self-issued-NUBAN provider config for the tenant on Payments isn't part of either
 script — that's real vendor credentials (a Paystack secret key, or eventually a licensed bank's

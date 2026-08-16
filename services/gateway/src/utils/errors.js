@@ -26,6 +26,18 @@ class TenantBackendCredentialNotFoundError extends GatewayError {
   }
 }
 
+// Thrown when a sandbox-tier key is used before its tenant's sandbox
+// twin has been provisioned — see src/services/sandboxTenantService.js
+// and deploy/provision-tenant.sh's provision_sandbox_twin.
+class SandboxNotProvisionedError extends GatewayError {
+  constructor(tenantId) {
+    super(
+      `Tenant ${tenantId} has no sandbox tenant provisioned yet — run provision-tenant.sh's sandbox step or POST /v1/tenants/${tenantId}/sandbox`,
+      'SANDBOX_NOT_PROVISIONED', 424
+    );
+  }
+}
+
 class RateLimitExceededError extends GatewayError {
   constructor(retryAfterSeconds) {
     super(`Rate limit exceeded — retry after ${retryAfterSeconds}s`, 'RATE_LIMIT_EXCEEDED', 429);
@@ -45,5 +57,5 @@ class BackendUnavailableError extends GatewayError {
 
 module.exports = {
   GatewayError, CredentialNotFoundError, TenantBackendCredentialNotFoundError,
-  RateLimitExceededError, BackendUnavailableError,
+  SandboxNotProvisionedError, RateLimitExceededError, BackendUnavailableError,
 };

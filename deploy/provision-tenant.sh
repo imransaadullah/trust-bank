@@ -19,24 +19,25 @@
 # re-bootstrapping — safe to run again to regenerate a product backend's
 # env snippet without minting new credentials.
 #
+# Also provisions a synthetic sandbox twin for the tenant (see
+# provision_sandbox_twin below) — a second, isolated tenant in Ledger/
+# Payments/Compliance that the gateway's sandbox-tier keys resolve to
+# instead of the real tenant's own data (services/gateway's
+# SandboxTenant model, src/middleware/resolveEffectiveTenant.js).
+#
 # Usage:
 #   ./provision-tenant.sh --slug trustpay --name "TrustPay" \
 #     --license-type OTHER --base-currency NGN \
-#     --product-backend-env /home/ubuntu/trust-bank/services/trustpay-backend/.env \
-#     --payments-env /home/ubuntu/trust-bank/services/payments/.env
+#     --product-backend-env /home/ubuntu/trust-bank/services/trustpay-backend/.env
 #
-# Known limitation, not something this script can fix: Payments holds a
-# single global LEDGER_API_KEY in its own .env (services/payments/src/
-# services/ledgerClient.js), used for every tenant's settlement calls —
-# but every Ledger credential except platform-admin is tenant-bound and
-# rejects a mismatched tenant. That's correct for onboarding the first/
-# only tenant on a box. Provisioning a *second* tenant and passing
-# --payments-env again would overwrite the first tenant's Ledger
-# credential in Payments and break its settlement calls. That's a real
-# gap in Payments' credential model, not a deployment-tooling problem —
-# flagged here rather than silently onboarding a second tenant into a
-# broken state. Omit --payments-env on a second tenant until that's
-# addressed.
+# Payments' own Ledger credential (services/payments/src/services/
+# ledgerClient.js) is now stored per-tenant via Payments' own
+# POST /v1/tenants/:id/ledger-credential (store_payments_ledger_credential
+# below), not written into Payments' .env — a single shared .env value
+# could only ever work for one tenant, since the Ledger cross-checks
+# X-Tenant-Id against the credential's own bound tenant. This is what
+# makes provisioning a second tenant (the sandbox twin, or any real
+# second tenant) safe on the same box.
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
@@ -52,7 +53,7 @@ PAYMENTS_URL="${PAYMENTS_SERVICE_URL:-http://127.0.0.1:8081}"
 COMPLIANCE_URL="${COMPLIANCE_SERVICE_URL:-http://127.0.0.1:8083}"
 GATEWAY_URL="${GATEWAY_SERVICE_URL:-http://127.0.0.1:8084}"
 
-SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV="" PAYMENTS_ENV=""
+SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV=""
 
 usage() {
   cat <<EOF
@@ -60,9 +61,6 @@ Usage: $0 --slug SLUG --name NAME [options]
   --license-type TYPE       UNIT_MFB | STATE_MFB | NATIONAL_MFB | PSB | BAAS_RESELLER | OTHER (default: OTHER)
   --base-currency CUR       default: NGN
   --product-backend-env P   .env file to append TENANT_ID/*_API_KEY to (printed instead if omitted)
-  --payments-env P          Payments' own .env to write its Ledger credential into (see the
-                            single-global-key limitation noted at the top of this file — first
-                            tenant on a box only)
 EOF
   exit 1
 }
@@ -74,7 +72,6 @@ while [ $# -gt 0 ]; do
     --license-type) LICENSE_TYPE="$2"; shift 2 ;;
     --base-currency) BASE_CURRENCY="$2"; shift 2 ;;
     --product-backend-env) PRODUCT_BACKEND_ENV="$2"; shift 2 ;;
-    --payments-env) PAYMENTS_ENV="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -273,6 +270,23 @@ store_gateway_backend_credentials() {
   touch "$TENANT_DIR/gateway_backend_credentials_stored"
 }
 
+# ---------------------------------------------------------------------------
+# Payments' own Ledger credential — per-tenant, not a shared .env value
+# (see the note at the top of this file). Needs ledger_operate_payments.token
+# (bootstrap_ledger_credentials) and payments_admin.token
+# (bootstrap_node_service_credentials payments) to already exist.
+# ---------------------------------------------------------------------------
+store_payments_ledger_credential() {
+  [ -f "$TENANT_DIR/payments_ledger_credential_stored" ] && return
+  log "Storing $SLUG's Ledger credential in Payments (per-tenant, not .env)"
+  local admin_token; admin_token="$(cat "$TENANT_DIR/payments_admin.token")"
+  curl -sf -X POST "$PAYMENTS_URL/v1/tenants/$TENANT_ID/ledger-credential" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/ledger_operate_payments.token")" '{token:$t}')" >/dev/null \
+    || die "storing Payments' Ledger credential failed"
+  touch "$TENANT_DIR/payments_ledger_credential_stored"
+}
+
 issue_starter_sandbox_key() {
   [ -f "$TENANT_DIR/gateway_sandbox.token" ] && return
   log "Issuing a starter sandbox-tier API key for $SLUG"
@@ -319,11 +333,10 @@ publish_default_policy() {
 # 7. Hand the operate credentials to a product backend
 # ---------------------------------------------------------------------------
 write_env_snippet() {
-  local ledger_key payments_key compliance_key ledger_key_for_payments
+  local ledger_key payments_key compliance_key
   ledger_key="$(cat "$TENANT_DIR/ledger_operate.token")"
   payments_key="$(cat "$TENANT_DIR/payments_operate.token")"
   compliance_key="$(cat "$TENANT_DIR/compliance_operate.token")"
-  ledger_key_for_payments="$(cat "$TENANT_DIR/ledger_operate_payments.token")"
 
   if [ -n "$PRODUCT_BACKEND_ENV" ]; then
     [ -f "$PRODUCT_BACKEND_ENV" ] || die "$PRODUCT_BACKEND_ENV does not exist"
@@ -345,24 +358,56 @@ PAYMENTS_API_KEY=$payments_key
 COMPLIANCE_API_KEY=$compliance_key
 EOF
   fi
-
-  if [ -n "$PAYMENTS_ENV" ]; then
-    [ -f "$PAYMENTS_ENV" ] || die "$PAYMENTS_ENV does not exist"
-    log "Writing $SLUG's Ledger credential into $PAYMENTS_ENV (see the single-global-key note at the top of this file)"
-    env_file_set LEDGER_API_KEY "$ledger_key_for_payments" "$PAYMENTS_ENV"
-    log "Restart Payments to pick this up: sudo systemctl restart trustbank-payments"
-  else
-    cat <<EOF
-No --payments-env given — Payments needs its own Ledger credential to boot (services/payments/
-src/config/index.js requires LEDGER_API_KEY). Add to Payments' own .env:
-
-LEDGER_API_KEY=$ledger_key_for_payments
-EOF
-  fi
 }
 
 # ---------------------------------------------------------------------------
-# 8. Print the gateway's own credentials — nothing gets written into a
+# 8. Sandbox twin — a second, synthetic tenant so the gateway's
+#    sandbox-tier key issued above resolves to genuinely isolated data
+#    instead of just a lower rate limit (services/gateway's SandboxTenant
+#    model, src/middleware/resolveEffectiveTenant.js). Provisioned via the
+#    exact same primitives as the real tenant above — every function
+#    above reads SLUG/NAME/TENANT_ID/TENANT_DIR as globals, so re-running
+#    them against a second, temporarily-swapped set of globals provisions
+#    a second, fully independent tenant with no separate code path.
+# ---------------------------------------------------------------------------
+provision_sandbox_twin() {
+  local real_slug="$SLUG" real_name="$NAME" real_tenant_id="$TENANT_ID" real_tenant_dir="$TENANT_DIR"
+
+  SLUG="${real_slug}-sandbox"
+  NAME="${real_name} (Sandbox)"
+  TENANT_DIR="$SECRETS_DIR/tenants/$SLUG"
+  mkdir -p "$TENANT_DIR" && chmod 700 "$TENANT_DIR"
+
+  log "Provisioning sandbox twin for $real_slug"
+  create_tenant
+  bootstrap_ledger_credentials
+  bootstrap_node_service_credentials payments pay_live trustbank_payments
+  bootstrap_node_service_credentials compliance cmp_live trustbank_compliance
+  bootstrap_gateway_credentials
+  store_gateway_backend_credentials
+  store_payments_ledger_credential
+  publish_default_policy
+  local sandbox_tenant_id="$TENANT_ID"
+
+  # Restore the real tenant's state before registering the mapping —
+  # the registration call authenticates as the *real* tenant's gateway
+  # admin key and targets the real tenant's own URL.
+  SLUG="$real_slug"; NAME="$real_name"; TENANT_ID="$real_tenant_id"; TENANT_DIR="$real_tenant_dir"
+
+  if [ ! -f "$TENANT_DIR/sandbox_registered" ]; then
+    log "Registering $real_slug's sandbox twin with the gateway"
+    local admin_token; admin_token="$(cat "$TENANT_DIR/gateway_admin.token")"
+    curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/sandbox" \
+      -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+      -d "$(jq -n --arg s "$sandbox_tenant_id" '{sandboxTenantId:$s}')" >/dev/null \
+      || die "registering the sandbox twin with the gateway failed"
+    touch "$TENANT_DIR/sandbox_registered"
+  fi
+  printf '%s' "$sandbox_tenant_id" > "$TENANT_DIR/sandbox_tenant_id"
+}
+
+# ---------------------------------------------------------------------------
+# 9. Print the gateway's own credentials — nothing gets written into a
 #    .env for these (the gateway stores per-tenant credentials in its own
 #    database, not a shared file), so this is the only place they surface.
 # ---------------------------------------------------------------------------
@@ -374,8 +419,13 @@ integration): admin key and a starter sandbox key for '$SLUG':
 
 Admin key   (issue/revoke further keys, POST /v1/tenants/$TENANT_ID/api-keys):
   $(cat "$TENANT_DIR/gateway_admin.token")
-Sandbox key (the actual proxied banking routes, rate-limited):
+Sandbox key (the actual proxied banking routes, rate-limited, resolves to
+             the isolated sandbox tenant below — not $SLUG's real data):
   $(cat "$TENANT_DIR/gateway_sandbox.token")
+
+Sandbox tenant (isolated Ledger/Payments/Compliance twin the sandbox key
+above resolves to — see services/gateway's SandboxTenant model):
+  $(cat "$TENANT_DIR/sandbox_tenant_id")
 
 See services/gateway/README.md for the full route list and how to issue a
 production-tier key once this tenant is ready to go live.
@@ -390,9 +440,11 @@ main() {
   bootstrap_node_service_credentials compliance cmp_live trustbank_compliance
   bootstrap_gateway_credentials
   store_gateway_backend_credentials
+  store_payments_ledger_credential
   issue_starter_sandbox_key
   publish_default_policy
   write_env_snippet
+  provision_sandbox_twin
   print_gateway_summary
   log "Done. Per-tenant state cached under $TENANT_DIR for reruns."
 }

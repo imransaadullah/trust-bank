@@ -12,7 +12,6 @@ let app;
 
 beforeAll(() => {
   process.env.LEDGER_SERVICE_URL = process.env.LEDGER_SERVICE_URL || 'http://localhost:1';
-  process.env.LEDGER_API_KEY = process.env.LEDGER_API_KEY || 'unused-in-this-file';
   if (!process.env.DATABASE_URL) return;
   prisma = require('../src/db/prismaClient');
   credentialService = require('../src/services/credentialService');

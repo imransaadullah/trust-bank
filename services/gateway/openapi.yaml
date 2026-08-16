@@ -9,7 +9,12 @@ info:
     engineers integrate against directly: accounts, transfers, identity
     verification, and compliance checks, proxied to Ledger/Payments/
     Compliance with tiered API keys, per-key rate limiting, and per-backend
-    circuit breaking in front.
+    circuit breaking in front. A sandbox-tier key is genuinely isolated —
+    its own tenant in Ledger/Payments/Compliance, not just a lower rate
+    limit on the same production data (see the /sandbox admin route
+    below) — while every route below is called with the same URL
+    (/v1/tenants/{realTenantId}/...) regardless of which tier issued the
+    key.
 
 
     Every route below was exercised for real during this service's own
@@ -117,6 +122,40 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /v1/tenants/{tenantId}/sandbox:
+    post:
+      summary: Register this tenant's sandbox twin
+      description: >
+        Admin-tier key required. Registers the mapping a sandbox-tier key
+        resolves to at request time — a genuinely separate tenant in
+        Ledger/Payments/Compliance, provisioned the same way any tenant
+        is (deploy/provision-tenant.sh's provision_sandbox_twin), not a
+        lower rate limit on the same data. Normally called by that
+        script during onboarding, not by a bank's own integration.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sandboxTenantId]
+              properties:
+                sandboxTenantId: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Registered
+    get:
+      summary: Check whether this tenant's sandbox twin is registered
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      responses:
+        '200':
+          description: "{ tenantId, sandboxTenantId }"
+        '404':
+          description: No sandbox twin registered yet
 
   /v1/tenants/{tenantId}/backend-credentials:
     post:
@@ -342,10 +381,12 @@ components:
       type: http
       scheme: bearer
       description: >
-        `gw_live_...`. Admin-tier for the two Admin-tagged routes above;
+        `gw_live_...`. Admin-tier for the Admin-tagged routes above;
         sandbox or production tier for everything else. A key only works
         for the tenant it was issued to — the tenantId in the path must
-        match.
+        match. A sandbox-tier key is transparently resolved to that
+        tenant's isolated sandbox twin before the request ever reaches a
+        backend — see the /sandbox admin route.
   parameters:
     TenantId:
       name: tenantId

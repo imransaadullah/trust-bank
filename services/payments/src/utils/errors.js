@@ -37,6 +37,16 @@ class CredentialNotFoundError extends PaymentsError {
   }
 }
 
+class TenantLedgerCredentialNotFoundError extends PaymentsError {
+  constructor(tenantId) {
+    super(
+      `No Ledger credential stored for tenant ${tenantId} — Payments can't call the Ledger on this tenant's behalf until one is stored via POST /v1/tenants/:tenantId/ledger-credential`,
+      'TENANT_LEDGER_CREDENTIAL_NOT_FOUND',
+      424,
+    );
+  }
+}
+
 module.exports = {
   PaymentsError,
   TenantNotConfiguredError,
@@ -44,4 +54,5 @@ module.exports = {
   WebhookVerificationError,
   InvalidProviderError,
   CredentialNotFoundError,
+  TenantLedgerCredentialNotFoundError,
 };

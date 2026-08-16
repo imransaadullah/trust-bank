@@ -10,7 +10,6 @@ let KudaBillsProvider;
 
 beforeAll(() => {
   process.env.LEDGER_SERVICE_URL = process.env.LEDGER_SERVICE_URL || 'http://localhost:1';
-  process.env.LEDGER_API_KEY = process.env.LEDGER_API_KEY || 'test-key';
   if (!process.env.DATABASE_URL) return;
   prisma = require('../src/db/prismaClient');
   billsConfigService = require('../src/services/billsConfigService');

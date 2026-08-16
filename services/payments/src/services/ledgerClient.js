@@ -1,21 +1,27 @@
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
+const tenantLedgerCredentialService = require('./tenantLedgerCredentialService');
+const { PaymentsError } = require('../utils/errors');
 
 class LedgerClient {
   constructor() {
     this.baseUrl = config.ledger.baseUrl;
-    this.apiKey = config.ledger.apiKey;
   }
 
   async _request(tenantId, method, path, data) {
     try {
+      // Ledger cross-checks X-Tenant-Id against the credential's own
+      // bound tenant, so this must be the calling tenant's own
+      // operate-scope credential, not a single shared one — see
+      // TenantLedgerCredential's schema comment.
+      const apiKey = await tenantLedgerCredentialService.get(tenantId);
       const response = await axios({
         method,
         url: `${this.baseUrl}${path}`,
         data,
         headers: {
-          Authorization: `Bearer ${this.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'X-Tenant-Id': tenantId,
           'Content-Type': 'application/json',
         },
@@ -23,6 +29,12 @@ class LedgerClient {
       });
       return response.data;
     } catch (error) {
+      // A missing credential (TenantLedgerCredentialNotFoundError) isn't
+      // an axios error — let it propagate with its own 424, not get
+      // flattened into a generic "Ledger request failed" below.
+      if (error instanceof PaymentsError) {
+        throw error;
+      }
       const status = error.response?.status;
       const body = error.response?.data;
       logger.error(`[LedgerClient] ${method} ${path} failed: ${status} ${JSON.stringify(body)}`);

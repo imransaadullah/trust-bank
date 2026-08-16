@@ -84,3 +84,27 @@ model TenantBackendCredential {
   @@unique([tenantId, service])
   @@map("tenant_backend_credentials")
 }
+
+// ============================================
+// SANDBOX TENANT
+// The mapping that makes a sandbox-tier key actually isolated: a real
+// tenant calling /v1/tenants/{realTenantId}/... always sees that same URL
+// regardless of key tier, but a sandbox-tier key's requests get proxied
+// to a *different*, synthetic tenant in Ledger/Payments/Compliance — its
+// own accounts, its own data, safe to break. One synthetic twin per real
+// tenant (not per key), provisioned once at onboarding time by
+// deploy/provision-tenant.sh's provision_sandbox_twin, not lazily at
+// request time — creating a tenant means seeding a full chart of
+// accounts in the Ledger and bootstrapping credentials on three
+// services, not something to do mid-request. TenantBackendCredential
+// rows exist for the sandbox tenant id too, same table, just a different
+// tenantId — no schema changes needed there.
+// ============================================
+model SandboxTenant {
+  id              String   @id @default(uuid())
+  realTenantId    String   @unique @map("real_tenant_id")
+  sandboxTenantId String   @unique @map("sandbox_tenant_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  @@map("sandbox_tenants")
+}

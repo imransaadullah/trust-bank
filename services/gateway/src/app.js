@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const healthRoutes = require('./routes/health');
 const apiKeysRoutes = require('./routes/apiKeys');
 const backendCredentialsRoutes = require('./routes/backendCredentials');
+const sandboxRoutes = require('./routes/sandbox');
 const accountsRoutes = require('./routes/accounts');
 const identityRoutes = require('./routes/identity');
 const complianceRoutes = require('./routes/compliance');
@@ -22,6 +23,7 @@ function createApp() {
   // proxied banking routes a bank's engineers integrate against.
   app.use('/v1/tenants', apiKeysRoutes);
   app.use('/v1/tenants', backendCredentialsRoutes);
+  app.use('/v1/tenants', sandboxRoutes);
   app.use('/v1/tenants', accountsRoutes);
   app.use('/v1/tenants', identityRoutes);
   app.use('/v1/tenants', complianceRoutes);

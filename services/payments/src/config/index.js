@@ -17,10 +17,12 @@ module.exports = {
   encryptionKey: required('PAYMENTS_ENCRYPTION_KEY'),
   ledger: {
     baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080',
-    // An operate-scope Ledger credential, issued via the Ledger's
-    // cmd/bootstrap-key or POST /v1/credentials — see
-    // SERVICE_CREDENTIAL_MODEL.md. No longer a shared secret.
-    apiKey: required('LEDGER_API_KEY'),
+    // No shared/global API key here — each call uses the calling
+    // tenant's own operate-scope Ledger credential, stored encrypted
+    // per-tenant (TenantLedgerCredential, see
+    // src/services/tenantLedgerCredentialService.js). Stored via
+    // POST /v1/tenants/:tenantId/ledger-credential, provisioned by
+    // deploy/provision-tenant.sh.
   },
   reconciliation: {
     // Operational tuning, not regulatory policy — doesn't go through

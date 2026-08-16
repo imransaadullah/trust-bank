@@ -8,7 +8,7 @@ function proxyRoute(service, method, pathBuilder, { statusCode = 200 } = {}) {
   return async (req, res, next) => {
     try {
       const data = await backendProxy.call(service, {
-        method, path: pathBuilder(req), tenantId: req.params.tenantId, data: req.body,
+        method, path: pathBuilder(req), tenantId: req.effectiveTenantId, data: req.body,
       });
       res.status(statusCode).json({ success: true, data });
     } catch (err) {

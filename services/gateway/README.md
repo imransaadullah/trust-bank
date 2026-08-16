@@ -69,18 +69,40 @@ the actual `deploy/provision-tenant.sh` (not by hand):
   through the gateway during verification, not mocked. See `openapi.yaml`
   for the exact shapes, captured from that run.
 
+- **A genuinely isolated sandbox** (Phase 2 slice 2) — a sandbox-tier key
+  now resolves to a real, separate tenant in Ledger/Payments/Compliance
+  (`SandboxTenant`, `src/middleware/resolveEffectiveTenant.js`), not the
+  same production data at a lower rate limit. The external contract stays
+  the same URL (`/v1/tenants/{realTenantId}/...`) for both tiers — only
+  which tenant the request actually reaches changes. Provisioned once per
+  real tenant at onboarding time by `deploy/provision-tenant.sh`'s
+  `provision_sandbox_twin`, not lazily at request time (creating a tenant
+  means seeding a full chart of accounts in the Ledger and bootstrapping
+  credentials on three services — not something to do mid-request).
+  Verified live: opened an account with a sandbox key and a production
+  key against the same tenant URL, then confirmed directly against the
+  Ledger (bypassing the gateway) that each account is only visible under
+  its own tenant's credential — a 404 in both directions, RLS-backed, not
+  just gateway-level bookkeeping. A sandbox key used before its tenant's
+  twin is registered gets a clean `424 SANDBOX_NOT_PROVISIONED`, verified
+  live against a tenant with no twin.
+- **A real, latent bug this slice's own precondition exposed**: Payments
+  called the Ledger using one single global `LEDGER_API_KEY` from its own
+  `.env` for every tenant's settlement calls — harmless with only one
+  tenant ever provisioned (TrustPay), but the Ledger cross-checks
+  `X-Tenant-Id` against the credential's own bound tenant, so a second
+  tenant on the same box (which a sandbox twin necessarily is) would have
+  had its deposit-confirm/reversal calls rejected outright. Fixed by
+  giving Payments its own per-tenant encrypted credential store
+  (`TenantLedgerCredential`, mirroring this service's own
+  `TenantBackendCredential`) — verified live by confirming a deposit for
+  both the real tenant and its sandbox twin succeed on the same box.
+
 **Explicit placeholders:**
 - **No jest test suite yet** — this pass's verification was entirely live
   integration testing (see above), not unit tests. Worth adding, not
   blocking for a first slice.
-- **Sandbox vs. production aren't actually different environments** —
-  today `tier` only changes the rate limit; a sandbox key still hits the
-  same Ledger/Payments/Compliance instances and real tenant data a
-  production key does. A genuinely isolated sandbox (its own tenant, its
-  own data, safe to break) is real, separate, later work — see
-  `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §13's "sandbox" as its own
-  Phase 2 slice.
-- **No developer portal** — also its own later slice. `openapi.yaml` is
+- **No developer portal** — its own later slice. `openapi.yaml` is
   the API's documentation today; nothing renders it yet.
 - **`TenantBackendCredential`'s single credential per (tenant, service)**
   — same shape as every other credential in this platform, but if a
@@ -139,20 +161,26 @@ Amounts are kobo, matching the rest of the platform.
 ```
 prisma/                ApiKey (tiered, rate-limited), RateLimitCounter (Postgres-backed,
                        fixed 1-minute windows), TenantBackendCredential (encrypted
-                       per-tenant Ledger/Payments/Compliance credential)
+                       per-tenant Ledger/Payments/Compliance credential), SandboxTenant
+                       (real tenant -> its isolated sandbox twin)
 scripts/bootstrapKey.js  issues the first admin-tier key for a tenant
 src/crypto/tenantBackendCredentials.js  AES-256-GCM, same pattern as services/payments'
                                         tenantSecrets.js
+src/middleware/resolveEffectiveTenant.js  swaps in a sandbox-tier key's isolated twin
+                                          before any backend call — see src/services/
+                                          sandboxTenantService.js
 src/services/
   apiKeyService.js              issue/verify/revoke/list — mirrors credentialService.js
                                  across the other three services
   rateLimitService.js            atomic Postgres upsert-increment per request
   tenantBackendCredentialService.js  store/get a tenant's encrypted backend credential
+  sandboxTenantService.js         resolve/register a tenant's sandbox twin
   backendProxy.js                 one opossum circuit breaker per backend, unifies
                                    Ledger's header-tenant/raw-response shape and
                                    Payments'/Compliance's path-tenant/wrapped-response
                                    shape so route handlers never see the difference
 src/routes/
+  sandbox.js                          admin-tier — register/check a tenant's sandbox twin
   apiKeys.js, backendCredentials.js   admin-tier only
   accounts.js                          Ledger: accounts, transfers
   identity.js                          Payments: identity verification, payouts

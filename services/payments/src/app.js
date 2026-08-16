@@ -5,6 +5,7 @@ const cors = require('cors');
 const errorHandler = require('./middleware/errorHandler');
 
 const tenantConfigRoutes = require('./routes/tenantConfig');
+const ledgerCredentialRoutes = require('./routes/ledgerCredential');
 const credentialsRoutes = require('./routes/credentials');
 const accountsRoutes = require('./routes/accounts');
 const identityRoutes = require('./routes/identity');
@@ -37,6 +38,7 @@ function createApp() {
   // same '/v1/tenants' prefix, before that router ever got a chance to
   // not-match and pass through.
   app.use('/v1/tenants', tenantConfigRoutes);
+  app.use('/v1/tenants', ledgerCredentialRoutes);
   app.use('/v1/tenants', credentialsRoutes);
   app.use('/v1/tenants', accountsRoutes);
   app.use('/v1/tenants', identityRoutes);
