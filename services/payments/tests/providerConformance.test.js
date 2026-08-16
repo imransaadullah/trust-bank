@@ -36,7 +36,10 @@ describe('provider contract conformance', () => {
   });
 
   const SYNC_METHODS = ['verifyWebhookSignature', 'parseWebhookEvent'];
-  const ASYNC_METHODS = CONTRACT_METHODS.filter((m) => !SYNC_METHODS.includes(m));
+  // provisionAccount is real now (NUBAN check-digit generation is public,
+  // standardized math — see selfIssuedNuban.test.js) — everything else
+  // still needs an actual switching partner's shape and stays a stub.
+  const ASYNC_METHODS = CONTRACT_METHODS.filter((m) => !SYNC_METHODS.includes(m) && m !== 'provisionAccount');
 
   test.each(ASYNC_METHODS)(
     'SelfIssuedNubanProvider.%s rejects as not-implemented rather than silently no-op-ing',

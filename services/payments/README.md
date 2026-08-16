@@ -28,8 +28,11 @@ Paystack HTTP round trip:**
   service is never meant to be internet-facing in any deployment model.
   See `../../deploy/NETWORK_TOPOLOGY.md`.
 - The provider contract, proven against two structurally different rails —
-  Paystack (implemented) and a self-issued-NUBAN stub (interface only,
-  every method rejects "not implemented" — see `src/providers/selfIssuedNuban.js`).
+  Paystack (implemented) and self-issued NUBAN (`src/providers/selfIssuedNuban.js`).
+  `provisionAccount` is real: the CBN/NIBSS check-digit algorithm, verified
+  against the CBN circular's own worked example. Every other method still
+  rejects "not implemented" — they need an actual switching partner's API
+  shape, not more math.
 - Webhook signature verification (HMAC-SHA512) and event parsing, unit-tested
   against fixture payloads.
 - The full inbound settlement path, run end-to-end against a live Ledger:
@@ -115,8 +118,12 @@ pass covers outbound (withdrawal payouts) and bill purchases only.
 **Explicit placeholders:**
 - **No mTLS** — see the Ledger's README and `../../deploy/NETWORK_TOPOLOGY.md`;
   credential scoping is done, mTLS for a real hybrid deployment isn't.
-- **`selfIssuedNuban.js`** — interface only. NUBAN generation and a NIBSS
-  switching-partner integration aren't built; nothing needs them yet.
+- **`selfIssuedNuban.js`** — `provisionAccount`'s check-digit math is real
+  and verified; its serial-number allocation is a deterministic
+  placeholder (not collision-safe, not a real bank's own scheme — see the
+  comment above `deriveSerial`), and the NIBSS switching-partner
+  integration (settlement, webhooks, outbound) isn't built. Nothing needs
+  the latter yet.
 - **`vtpassBillsProvider.js`** — interface only, same role as
   `selfIssuedNuban.js`: proves the bills contract isn't secretly
   Kuda-shaped, nothing more.
@@ -222,7 +229,8 @@ curl -X POST localhost:8081/v1/tenants/$TENANT_ID/bills-reconcile \
 prisma/               TenantProviderConfig, ProvisionedAccount, SettlementAttempt, ApiCredential,
                        TenantBillsProviderConfig, BillPaymentAttempt
 scripts/bootstrapKey.js  issues the first admin credential for a fresh tenant
-src/providers/         payment rails: provider.js (contract) + paystack.js + selfIssuedNuban.js (stub)
+src/providers/         payment rails: provider.js (contract) + paystack.js + selfIssuedNuban.js
+                       (provisionAccount real, settlement/webhooks still a stub)
                        bills: billsProvider.js (contract) + kudaBillsProvider.js + vtpassBillsProvider.js (stub)
                        billsRegistry.js — bills-specific, separate from registry.js
 src/crypto/            tenant credential encryption at rest — shared by both config services
