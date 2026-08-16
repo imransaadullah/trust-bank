@@ -130,6 +130,79 @@ Configure real credentials in `deploy/backup.env` (copied from `backup.env.examp
 install, never overwritten afterward), then rehearse a restore before trusting any of this:
 `./restore.sh trust_bank_ledger`.
 
+### Verifying a restore actually worked
+
+`restore.sh` exiting 0 means `pg_restore` didn't error — it doesn't mean the data is right. Pick
+a real value from the live database before restoring, then confirm the restored copy matches
+exactly. For the Ledger, `ledger_lines.amount` is a good choice — it's what every balance is
+actually built from:
+
+```bash
+# Before restoring — note a real, checkable number from the live database
+psql -p 5432 -U postgres -d trust_bank_ledger -c "SELECT count(*), sum(amount) FROM ledger_lines;"
+
+./restore.sh trust_bank_ledger    # restores into trust_bank_ledger_restore_test by default
+
+# After — this must match the number above exactly, not approximately
+psql -p 5432 -U postgres -d trust_bank_ledger_restore_test -c "SELECT count(*), sum(amount) FROM ledger_lines;"
+```
+
+Row count alone can pass even when something's subtly wrong (e.g. every row present but a value
+corrupted) — pairing it with a real aggregate like `sum(amount)` is what actually caught problems
+during this feature's own live verification. Do this after every real config change to
+`backup.sh`/`restore.sh`, not just once.
+
+### Testing the notification pipeline without waiting for a real crash
+
+`OnFailure=` only fires once systemd gives up retrying a genuinely crash-looping service —
+useful for correctness, useless for finding out your webhook URL is wrong before you actually
+need it. Trigger a real test notification safely, without touching any of the four services:
+
+```bash
+sudo systemctl start trustbank-notify-failure@manual-test.service
+```
+
+This runs `notify-failure.sh manual-test` for real — a real webhook POST should land wherever
+`NOTIFY_WEBHOOK_URL` points, saying `trust-bank: manual-test failed on <host> at <time>`. If
+nothing arrives, the delivery path is broken and you'd rather find out now than during an actual
+incident.
+
+### Real disaster recovery — the full sequence, and what it doesn't cover
+
+1. Provision a new box, run `install.sh` — this builds fresh empty databases and, deliberately,
+   **generates new secrets** (`TRUSTPAY_JWT_SECRET`, `PAYMENTS_ENCRYPTION_KEY`, the Ledger's
+   `ledger_app` password). Read the warning below before going further.
+2. `sudo systemctl stop trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend`
+   — stop all four before restoring, so nothing writes to a half-restored database.
+3. Restore each database with its real name, not the rehearsal default:
+   ```bash
+   ./restore.sh trust_bank_ledger latest --target-db trust_bank_ledger
+   ./restore.sh trustbank_payments latest --target-db trustbank_payments
+   ./restore.sh trustbank_compliance latest --target-db trustbank_compliance
+   ./restore.sh trustpay_backend latest --target-db trustpay_backend
+   ```
+   (`pg_restore --clean --if-exists`, already in `restore.sh`, is safe against the fresh empty
+   databases `install.sh` just created — there's nothing to drop, so it just creates everything.)
+4. `sudo systemctl start trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend`
+
+**What this sequence does not recover, and backup.sh does not capture at all:**
+`PAYMENTS_ENCRYPTION_KEY` lives only in `services/payments/.env`, never in the database — but
+Payments' `TenantProviderConfig.encryptedCredentials` (a tenant's Paystack/self-issued-NUBAN
+secret key) was encrypted *with* it. `install.sh` generating a *new* key on the new box means the
+restored, encrypted rows in that table become permanently undecryptable — not corrupted data,
+just unreadable with the new key. The same problem applies with lower stakes to
+`TRUSTPAY_JWT_SECRET` (a new one just invalidates existing sessions; nobody loses money over it,
+they just have to log back in).
+
+There's no code fix for this in the current pass — extending `backup.sh` to also capture
+service-level secrets is a real design decision (storing an encryption key anywhere near the data
+it protects is its own anti-pattern, S3-bucket or not) that deserves its own conversation rather
+than folding in silently here. Until that's decided: **store `services/payments/.env`'s
+`PAYMENTS_ENCRYPTION_KEY` somewhere durable and separate from the database backups** — a password
+manager, a secrets manager, anything that isn't "only ever existed on the box that just died." Losing it means every tenant has to re-enter their provider credentials from scratch after a real
+disaster — recoverable, but disruptive, and avoidable for the cost of copying one value somewhere
+safe today.
+
 ## What's verified, and what isn't
 
 **Live-verified** against a real throwaway Postgres stack, the same way every other pass in this
