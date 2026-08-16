@@ -1,0 +1,404 @@
+openapi: 3.0.3
+info:
+  title: trust-bank API Gateway
+  version: 0.1.0
+  description: >
+    The public API for external bank/developer integration with trust-bank —
+    distinct from a tenant's own product backend (e.g. trustpay-backend),
+    which serves that tenant's *own* consumer app. This is what a bank's
+    engineers integrate against directly: accounts, transfers, identity
+    verification, and compliance checks, proxied to Ledger/Payments/
+    Compliance with tiered API keys, per-key rate limiting, and per-backend
+    circuit breaking in front.
+
+
+    Every route below was exercised for real during this service's own
+    build — not written speculatively. Response shapes are the actual
+    shapes returned, captured from a live run.
+  contact:
+    url: https://github.com/imransaadullah/trust-bank
+servers:
+  - url: https://api.trustbank.example.com
+    description: Production (see deploy/Caddyfile.example)
+  - url: http://localhost:8084
+    description: Local development
+
+security:
+  - bearerAuth: []
+
+paths:
+  /health:
+    get:
+      summary: Liveness — is the process up
+      security: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /ready:
+    get:
+      summary: Readiness — are Ledger, Payments, and Compliance all reachable
+      description: >
+        Pings each backend's own /health directly, not through the circuit
+        breakers in front of the banking routes — this reflects real-time
+        backend state, independent of breaker state.
+      security: []
+      responses:
+        '200':
+          description: All three backends reachable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+        '503':
+          description: One or more backends unreachable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReadyResponse' }
+
+  /v1/tenants/{tenantId}/api-keys:
+    post:
+      summary: Issue a sandbox or production API key
+      description: Admin-tier key required.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [label, tier]
+              properties:
+                label: { type: string, example: "mobile-app-prod" }
+                tier: { type: string, enum: [sandbox, production] }
+                rateLimitPerMinute:
+                  type: integer
+                  description: Overrides the tier default (sandbox 60, production 600).
+                  example: 600
+      responses:
+        '201':
+          description: Issued — the token is shown exactly once, here
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApiKeyIssued' }
+    get:
+      summary: List this tenant's API keys (tokens never included after issuance)
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/ApiKeySummary' }
+
+  /v1/tenants/{tenantId}/api-keys/{apiKeyId}/revoke:
+    post:
+      summary: Revoke a key immediately
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: apiKeyId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: Revoked
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/StatusOk' }
+
+  /v1/tenants/{tenantId}/backend-credentials:
+    post:
+      summary: Store this tenant's Ledger/Payments/Compliance operate credential
+      description: >
+        Admin-tier key required. Normally called by deploy/provision-tenant.sh
+        during onboarding, not by a bank's own integration.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [service, token]
+              properties:
+                service: { type: string, enum: [ledger, payments, compliance] }
+                token: { type: string }
+      responses:
+        '201':
+          description: Stored (encrypted at rest)
+
+  /v1/tenants/{tenantId}/accounts:
+    post:
+      summary: Open a Ledger account for a customer
+      tags: [Ledger]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [externalCustomerId]
+              properties:
+                externalCustomerId: { type: string, example: "customer-a" }
+                productType: { type: string, example: "wallet" }
+      responses:
+        '201':
+          description: >
+            Account opened. Example captured from a real run:
+            {"id":"48fe4705-...","externalCustomerId":"gw-customer-a","accountNumber":"7158326932","productType":"wallet","currency":"NGN","status":"ACTIVE","kycTier":0}
+
+  /v1/tenants/{tenantId}/accounts/{ledgerAccountId}/balance:
+    get:
+      summary: Get an account's current balance
+      tags: [Ledger]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: ledgerAccountId
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200':
+          description: >
+            Example: {"ledgerAccountId":"48fe4705-...","normalBalance":"CREDIT","amount":750000}
+
+  /v1/tenants/{tenantId}/transfers/p2p:
+    post:
+      summary: Transfer between two customers of this tenant
+      tags: [Ledger]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [fromExternalCustomerId, toExternalCustomerId, amount, reference, idempotencyKey]
+              properties:
+                fromExternalCustomerId: { type: string }
+                toExternalCustomerId: { type: string }
+                amount: { type: integer, description: "minor units (kobo)" }
+                reference: { type: string }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: Balanced journal entry created — see the Ledger's own docs for the full entry shape.
+
+  /v1/tenants/{tenantId}/transfers/deposit/confirm:
+    post:
+      summary: Confirm an inbound deposit already collected by a provider
+      tags: [Ledger]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [externalCustomerId, amount, reference, idempotencyKey]
+              properties:
+                externalCustomerId: { type: string }
+                amount: { type: integer }
+                providerRef: { type: string }
+                reference: { type: string }
+                idempotencyKey: { type: string }
+      responses:
+        '200':
+          description: Balanced journal entry created
+
+  /v1/tenants/{tenantId}/transfers/withdrawal:
+    post:
+      summary: Record a withdrawal (debit-first, reversed automatically on a confirmed payout failure)
+      tags: [Ledger]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [externalCustomerId, reference, idempotencyKey]
+              properties:
+                externalCustomerId: { type: string }
+                amount: { type: integer }
+                reference: { type: string }
+                idempotencyKey: { type: string }
+                description: { type: string }
+      responses:
+        '200':
+          description: Balanced journal entry created
+
+  /v1/tenants/{tenantId}/identity/verify:
+    post:
+      summary: Verify a customer's identity (BVN/NIN) with the tenant's configured provider
+      tags: [Payments]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [type, number, firstName, lastName]
+              properties:
+                type: { type: string, enum: [bvn, nin] }
+                number: { type: string }
+                firstName: { type: string }
+                lastName: { type: string }
+      responses:
+        '200':
+          description: "{ verified: boolean, matchedName?: string }"
+        '404':
+          description: >
+            No provider configured for this tenant yet — a real error
+            observed live: {"success":false,"error":"No provider configured
+            for tenant ...","code":"TENANT_NOT_CONFIGURED"}. Propagated
+            from Payments verbatim, not masked as a generic 500.
+
+  /v1/tenants/{tenantId}/payouts:
+    post:
+      summary: Initiate an outbound payout
+      tags: [Payments]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                externalCustomerId: { type: string }
+                amount: { type: integer }
+                beneficiaryAccountNumber: { type: string }
+                beneficiaryBankCode: { type: string }
+                beneficiaryName: { type: string }
+                reference: { type: string }
+                debitJournalEntryId: { type: string }
+      responses:
+        '200':
+          description: "{ providerRef, status: 'processing'|'completed'|'failed' }"
+
+  /v1/tenants/{tenantId}/compliance/kyc-tier-check:
+    post:
+      summary: Check whether a transaction is allowed under the customer's current KYC tier
+      tags: [Compliance]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [userId, tier, amount]
+              properties:
+                userId: { type: string }
+                tier: { type: integer }
+                amount: { type: integer }
+                amountTransactedTodayKobo: { type: integer }
+      responses:
+        '200':
+          description: >
+            Example captured live: {"allowed":false,"reason":"Exceeds the
+            single-transaction limit of 0 kobo for tier 0","dailyLimitKobo":0,
+            "singleTxnLimitKobo":0,"policyVersion":1}
+
+  /v1/tenants/{tenantId}/compliance/device-check:
+    post:
+      summary: Check whether a device needs a new-device cap applied
+      tags: [Compliance]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                userId: { type: string }
+                isNewDevice: { type: boolean }
+                deviceAgeHours: { type: number }
+                amount: { type: integer }
+      responses:
+        '200':
+          description: "{ allowed, capAppliedKobo?, cooldownHours?, reason?, policyVersion }"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        `gw_live_...`. Admin-tier for the two Admin-tagged routes above;
+        sandbox or production tier for everything else. A key only works
+        for the tenant it was issued to — the tenantId in the path must
+        match.
+  parameters:
+    TenantId:
+      name: tenantId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+  schemas:
+    StatusOk:
+      type: object
+      properties:
+        status: { type: string, example: ok }
+    ReadyResponse:
+      type: object
+      properties:
+        status: { type: string, enum: [ready, not_ready] }
+        backends:
+          type: object
+          properties:
+            ledger: { type: string, enum: [ok, unreachable] }
+            payments: { type: string, enum: [ok, unreachable] }
+            compliance: { type: string, enum: [ok, unreachable] }
+    ApiKeyIssued:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            label: { type: string }
+            tier: { type: string }
+            tokenPrefix: { type: string }
+            rateLimitPerMinute: { type: integer }
+            token: { type: string, description: "Shown once — cannot be retrieved again." }
+    ApiKeySummary:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        tier: { type: string }
+        tokenPrefix: { type: string }
+        status: { type: string, enum: [active, revoked] }
+        rateLimitPerMinute: { type: integer }
+        createdAt: { type: string, format: date-time }
+        revokedAt: { type: string, format: date-time, nullable: true }
+        lastUsedAt: { type: string, format: date-time, nullable: true }
+
+tags:
+  - name: Admin
+    description: Admin-tier only — provisioning, not integration.
+  - name: Ledger
+    description: Accounts and transfers, proxied to services/ledger.
+  - name: Payments
+    description: Identity verification and payouts, proxied to services/payments.
+  - name: Compliance
+    description: KYC-tier and device decision checks, proxied to services/compliance.

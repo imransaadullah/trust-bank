@@ -200,6 +200,16 @@ setup_node_service() {
         env_file_set TRUSTPAY_JWT_SECRET "$jwt_secret" "$env_file"
         capture_critical_secret trustpay-backend TRUSTPAY_JWT_SECRET "$jwt_secret"
         ;;
+      gateway)
+        # Same stakes as PAYMENTS_ENCRYPTION_KEY above — encrypts every
+        # tenant's stored Ledger/Payments/Compliance operate credential
+        # (TenantBackendCredential.encryptedToken). Losing it means every
+        # tenant needs re-provisioning via provision-tenant.sh, not that
+        # data is corrupted.
+        local gateway_key; gateway_key="$(gen_secret)"
+        env_file_set GATEWAY_ENCRYPTION_KEY "$gateway_key" "$env_file"
+        capture_critical_secret gateway GATEWAY_ENCRYPTION_KEY "$gateway_key"
+        ;;
     esac
   fi
 }
@@ -224,7 +234,7 @@ install_systemd_units() {
   local tmp; tmp="$(mktemp -d)"
   local unit
 
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend; do
     render_template "$SCRIPT_DIR/templates/${unit}.service.tmpl" "$tmp/${unit}.service" \
       "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
     sudo cp "$tmp/${unit}.service" "/etc/systemd/system/${unit}.service"
@@ -244,7 +254,7 @@ install_systemd_units() {
   rm -rf "$tmp"
 
   sudo systemctl daemon-reload
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend; do
     sudo systemctl enable "$unit"
     sudo systemctl restart "$unit"
   done
@@ -260,7 +270,7 @@ install_systemd_units() {
 setup_caddy() {
   log "Configuring Caddy"
   if [ ! -f /etc/caddy/Caddyfile ] || ! grep -q "reverse_proxy 127.0.0.1:8082" /etc/caddy/Caddyfile 2>/dev/null; then
-    warn "Caddy site block not detected — copy deploy/Caddyfile.example to /etc/caddy/Caddyfile, set your domain, then run: sudo systemctl reload caddy"
+    warn "Caddy site blocks not detected — copy deploy/Caddyfile.example to /etc/caddy/Caddyfile (two domains: trustpay-backend on :8082, the gateway on :8084), set your real domains, then run: sudo systemctl reload caddy"
   else
     sudo systemctl reload caddy
   fi
@@ -273,20 +283,24 @@ main() {
   setup_ledger
   setup_node_service payments trustbank_payments
   setup_node_service compliance trustbank_compliance
+  setup_node_service gateway trustbank_gateway
   setup_node_service trustpay-backend trustpay_backend
   setup_backup_env
   install_systemd_units
   setup_caddy
 
   log "Done. Service status:"
-  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend || true
+  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend || true
   cat <<EOF
 
 Next steps:
   1. trustpay-backend/.env still needs real vendor credentials before it will
      stay up: AUTHCORE_PROJECT_KEY, AUTHCORE_JWKS_URL, AUTHCORE_PROJECT_ID.
   2. Run deploy/provision-tenant.sh to onboard a tenant and populate
-     TENANT_ID / LEDGER_API_KEY / PAYMENTS_API_KEY / COMPLIANCE_API_KEY.
+     TENANT_ID / LEDGER_API_KEY / PAYMENTS_API_KEY / COMPLIANCE_API_KEY, and
+     the gateway's own per-tenant backend credentials (services/gateway —
+     the public API for external bank/developer integration, distinct from
+     trustpay-backend). See services/gateway/README.md.
   3. Payments' TenantProviderConfig (Paystack/self-issued-NUBAN credentials)
      is set up per-tenant via its own API — see services/payments/README.md.
   4. Fill in deploy/backup.env (S3-compatible bucket + credentials, a

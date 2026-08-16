@@ -1,12 +1,20 @@
 # Example reverse proxy for a SaaS/single-VPS deployment (see
 # ../NETWORK_TOPOLOGY.md). Caddy is the only process that binds a public
 # interface — it terminates TLS (automatic, via Let's Encrypt) and proxies
-# only to TrustPay Backend. Ledger, Payments, and Compliance are not
+# to exactly two things, on separate domains: TrustPay Backend (the
+# consumer app's own traffic) and the gateway (external bank/developer API
+# traffic, tiered keys, rate limited — services/gateway). Different
+# audiences, deliberately kept on different domains rather than one
+# proxy routing by path. Ledger, Payments, and Compliance are not
 # reachable through this or any other route from outside the box; they
 # bind 127.0.0.1 themselves regardless of what's in front of them.
 
 trustpay.example.com {
 	reverse_proxy 127.0.0.1:8082
+}
+
+api.trustbank.example.com {
+	reverse_proxy 127.0.0.1:8084
 }
 
 # Nothing else is proxied. Do not add routes for :8080 (Ledger), :8081
