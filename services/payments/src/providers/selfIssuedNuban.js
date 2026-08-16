@@ -48,10 +48,15 @@ function deriveSerial(externalCustomerId) {
 // TODO before this can back a real tenant:
 //   - deriveSerial: a real sequential/branch-coded allocation policy,
 //     coordinated with the bank's own core system — not a hash
-//   - parseWebhookEvent / a NIBSS-partner-specific inbound notification format
-//   - initiateOutbound: NIP outbound via the switching partner's API
-//   - verifyIdentity / verifyBeneficiary / getBankList: whatever the
-//     switching partner's own APIs for these turn out to be
+//   - parseWebhookEvent / initiateOutbound / verifyIdentity / verifyBeneficiary
+//     / getBankList: whatever the switching partner's own APIs turn out to
+//     be. Target NIBSS's National Payment Stack (ISO 20022 messaging,
+//     real-time settlement) rather than the legacy NIP rail it's replacing
+//     — NIBSS is actively decommissioning NIP for it as of August 2026, so
+//     older integration guides describing NIP's ISO 8583 shape are already
+//     the wrong target for new work. Not yet verified against NIBSS's own
+//     API docs (paywalled/JS-rendered where checked) — confirm the actual
+//     message shapes before implementing, don't assume from this comment.
 class SelfIssuedNubanProvider extends PaymentsProvider {
   constructor(credentials) {
     super('self_issued_nuban');

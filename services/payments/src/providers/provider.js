@@ -3,11 +3,11 @@ const { ProviderNotImplementedError } = require('../utils/errors');
 /**
  * The contract every payment rail implements. TrustPay rides on Paystack
  * today (no banking license); a real MFB/bank tenant would implement
- * this same contract by generating its own NUBAN and settling via NIBSS
- * (typically through a certified switching partner) instead — see
- * selfIssuedNuban.js, which implements this shape but not the behavior
- * yet. Nothing outside a provider file should know which rail a tenant
- * is on.
+ * this same contract by generating its own NUBAN (real now, see
+ * selfIssuedNuban.js) and settling via NIBSS's National Payment Stack —
+ * the ISO 20022 rail actively replacing legacy NIP, not NIP itself —
+ * typically through a certified switching partner. Nothing outside a
+ * provider file should know which rail a tenant is on.
  *
  * @typedef {Object} ProvisionedAccount
  * @property {string} accountNumber

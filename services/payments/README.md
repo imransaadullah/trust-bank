@@ -121,9 +121,12 @@ pass covers outbound (withdrawal payouts) and bill purchases only.
 - **`selfIssuedNuban.js`** — `provisionAccount`'s check-digit math is real
   and verified; its serial-number allocation is a deterministic
   placeholder (not collision-safe, not a real bank's own scheme — see the
-  comment above `deriveSerial`), and the NIBSS switching-partner
-  integration (settlement, webhooks, outbound) isn't built. Nothing needs
-  the latter yet.
+  comment above `deriveSerial`), and the settlement-partner integration
+  (settlement, webhooks, outbound) isn't built. Target NIBSS's National
+  Payment Stack (ISO 20022, real-time settlement) when it is — NIBSS is
+  actively decommissioning legacy NIP in its favor as of August 2026, so
+  older NIP-shaped integration guides are the wrong reference now. Nothing
+  needs this yet.
 - **`vtpassBillsProvider.js`** — interface only, same role as
   `selfIssuedNuban.js`: proves the bills contract isn't secretly
   Kuda-shaped, nothing more.
