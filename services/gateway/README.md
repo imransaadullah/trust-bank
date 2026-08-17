@@ -97,13 +97,40 @@ the actual `deploy/provision-tenant.sh` (not by hand):
   (`TenantLedgerCredential`, mirroring this service's own
   `TenantBackendCredential`) — verified live by confirming a deposit for
   both the real tenant and its sandbox twin succeed on the same box.
+- **A developer portal** (Phase 2 slice 3) — `GET /docs` renders the
+  gateway's own live `/openapi.yaml` via a self-hosted Redoc bundle
+  (`public/redoc.standalone.js`, vendored once, no CDN at runtime — the
+  one CDN reference Redoc's own bundle makes internally for a decorative
+  logo asset fails gracefully and doesn't affect the page). Unauthenticated,
+  same posture as `/health` — a prospective bank should be able to read
+  the API before ever holding a key. Because it renders the actual
+  checked-in spec file rather than a separately-hosted copy, the docs can
+  never drift from what's shipped. Verified live in a real browser, not
+  just curl: full route list renders, schemas expand, response samples
+  display, and existing routes are unaffected. Caught one real bug in the
+  process — see below.
+- **A real bug this caught**: the portal's `Redoc.init()` call was
+  originally inline in `index.html`; this service's own `helmet()`
+  default CSP (`script-src 'self'`, no `unsafe-inline`) silently blocked
+  it — the page loaded and the vendored bundle parsed fine, but the
+  loading spinner never cleared and `/openapi.yaml` was never even
+  fetched. Found by checking the browser's own network log during live
+  verification, not by reading the code. Fixed by moving the init call
+  into its own same-origin file (`public/init.js`), which needs no CSP
+  relaxation at all — the more minimal fix over widening the CSP.
 
 **Explicit placeholders:**
 - **No jest test suite yet** — this pass's verification was entirely live
   integration testing (see above), not unit tests. Worth adding, not
   blocking for a first slice.
-- **No developer portal** — its own later slice. `openapi.yaml` is
-  the API's documentation today; nothing renders it yet.
+- **No self-serve key management, usage/billing dashboard, or status
+  page** — `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §10's fuller
+  developer-portal vision. Self-serve key issuance needs a bank's-own-
+  developer login system that doesn't exist yet (today, `admin` keys are
+  only ever handed out by whoever runs `provision-tenant.sh`); usage/
+  billing dashboards need metering/billing infrastructure that doesn't
+  exist anywhere in this platform. Both are real, separate initiatives,
+  not a natural extension of rendering the docs.
 - **`TenantBackendCredential`'s single credential per (tenant, service)**
   — same shape as every other credential in this platform, but if a
   tenant's Ledger/Payments/Compliance operate credential is ever revoked
@@ -159,6 +186,9 @@ Amounts are kobo, matching the rest of the platform.
 ## Layout
 
 ```
+public/                 the developer portal — index.html + init.js (same-origin, no inline
+                        script — see the CSP bug above) + a vendored redoc.standalone.js,
+                        served at GET /docs; GET /openapi.yaml serves the spec itself live
 prisma/                ApiKey (tiered, rate-limited), RateLimitCounter (Postgres-backed,
                        fixed 1-minute windows), TenantBackendCredential (encrypted
                        per-tenant Ledger/Payments/Compliance credential), SandboxTenant

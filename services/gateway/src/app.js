@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -18,6 +19,16 @@ function createApp() {
   app.use(express.json());
 
   app.use(healthRoutes);
+
+  // Developer portal — unauthenticated, same posture as /health: a
+  // prospective bank should be able to read the API reference before
+  // ever holding a key, and nothing in the spec is sensitive. Redoc
+  // renders /openapi.yaml live from disk, so the docs can never drift
+  // from what's actually shipped the way a separately-hosted copy could.
+  app.get('/openapi.yaml', (req, res) => {
+    res.type('yaml').sendFile(path.join(__dirname, '../openapi.yaml'));
+  });
+  app.use('/docs', express.static(path.join(__dirname, '../public')));
 
   // Admin-tier: provisioning. Sandbox/production-tier: the actual
   // proxied banking routes a bank's engineers integrate against.
