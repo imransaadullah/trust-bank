@@ -1,0 +1,96 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// BRANCH
+// A tenant's own org-unit hierarchy — owned here, not the Ledger, same
+// convention every other cross-service tenant reference in this platform
+// already uses (Payments/Compliance store a plain tenantId string, no FK,
+// since tenant identity lives only in the Ledger). Built in from the
+// start, not deferred until a specific multi-branch tenant asks for it —
+// a NATIONAL_MFB's branch structure is a basic expectation of the market
+// segment trust-bank targets, not a speculative feature (see
+// CORE_BANKING_PLATFORM_ARCHITECTURE.md's Phase 2.5). Ledger's own
+// ledger_accounts will get a plain branch_id tag column referencing this
+// in a later slice — not built yet.
+// ============================================
+model Branch {
+  id        String   @id @default(uuid())
+  tenantId  String   @map("tenant_id")
+  code      String
+  name      String
+  status    String   @default("active") // 'active' | 'closed'
+  createdAt DateTime @default(now()) @map("created_at")
+
+  staffUsers StaffUser[]
+
+  @@unique([tenantId, code])
+  @@index([tenantId])
+  @@map("branches")
+}
+
+// ============================================
+// STAFF USER
+// The first human identity in this platform — every other credential
+// (Ledger admin/operate/platform-admin, Payments/Compliance/Gateway
+// admin/operate/tiered keys) is a machine credential, shown-once and
+// bearer-token-shaped. A staff member logs in with a password + MFA and
+// holds a role, same as SERVICE_CREDENTIAL_MODEL.md's "admin" tier
+// already gestures at ("a human... never a long-running service") but
+// never actually implemented. role is a fixed set for now (RBAC), not a
+// fully generic permission-string system — ABAC is real future scope,
+// not built speculatively here (same posture SERVICE_CREDENTIAL_MODEL.md
+// takes on its own future tiers).
+// ============================================
+model StaffUser {
+  id           String    @id @default(uuid())
+  tenantId     String    @map("tenant_id")
+  email        String
+  passwordHash String    @map("password_hash") // argon2id
+  role         String    // 'teller' | 'branch_manager' | 'compliance_officer' | 'ops_admin'
+  branchId     String?   @map("branch_id") // null for tenant-wide roles (ops_admin, compliance_officer)
+  status       String    @default("active") // 'active' | 'suspended' | 'revoked'
+  mfaSecret    String?   @map("mfa_secret") // AES-256-GCM encrypted TOTP secret — see src/crypto/mfaSecrets.js
+  mfaEnabled   Boolean   @default(false) @map("mfa_enabled")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+  lastLoginAt  DateTime? @map("last_login_at")
+
+  branch   Branch?         @relation(fields: [branchId], references: [id])
+  sessions StaffSession[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("staff_users")
+}
+
+// ============================================
+// STAFF SESSION
+// Same shown-once/hashed/indexed-prefix shape as every other credential
+// in this platform (SERVICE_CREDENTIAL_MODEL.md), but short-lived where
+// every other credential is long-lived — CORE_BANKING_PLATFORM_
+// ARCHITECTURE.md section 7: "session timeouts tuned for a banking
+// back-office — short." expiresAt is a sliding idle timeout, extended on
+// each authenticated request (see staffSessionService.touch).
+// ============================================
+model StaffSession {
+  id             String   @id @default(uuid())
+  staffUserId    String   @map("staff_user_id")
+  tokenPrefix    String   @unique @map("token_prefix")
+  hashedToken    String   @map("hashed_token")
+  status         String   @default("active") // 'active' | 'revoked' | 'expired'
+  createdAt      DateTime @default(now()) @map("created_at")
+  expiresAt      DateTime @map("expires_at")
+  lastActivityAt DateTime @default(now()) @map("last_activity_at")
+
+  staffUser StaffUser @relation(fields: [staffUserId], references: [id])
+
+  @@index([staffUserId])
+  @@map("staff_sessions")
+}

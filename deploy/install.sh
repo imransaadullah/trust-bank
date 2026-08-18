@@ -210,6 +210,15 @@ setup_node_service() {
         env_file_set GATEWAY_ENCRYPTION_KEY "$gateway_key" "$env_file"
         capture_critical_secret gateway GATEWAY_ENCRYPTION_KEY "$gateway_key"
         ;;
+      identity)
+        # Same stakes as PAYMENTS_ENCRYPTION_KEY/GATEWAY_ENCRYPTION_KEY —
+        # encrypts every staff user's TOTP secret (StaffUser.mfaSecret).
+        # Losing it means every staff member needs to re-enroll MFA, not
+        # that data is corrupted.
+        local identity_key; identity_key="$(gen_secret)"
+        env_file_set IDENTITY_ENCRYPTION_KEY "$identity_key" "$env_file"
+        capture_critical_secret identity IDENTITY_ENCRYPTION_KEY "$identity_key"
+        ;;
     esac
   fi
 }
@@ -234,7 +243,7 @@ install_systemd_units() {
   local tmp; tmp="$(mktemp -d)"
   local unit
 
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend; do
     render_template "$SCRIPT_DIR/templates/${unit}.service.tmpl" "$tmp/${unit}.service" \
       "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
     sudo cp "$tmp/${unit}.service" "/etc/systemd/system/${unit}.service"
@@ -254,7 +263,7 @@ install_systemd_units() {
   rm -rf "$tmp"
 
   sudo systemctl daemon-reload
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend; do
     sudo systemctl enable "$unit"
     sudo systemctl restart "$unit"
   done
@@ -284,13 +293,14 @@ main() {
   setup_node_service payments trustbank_payments
   setup_node_service compliance trustbank_compliance
   setup_node_service gateway trustbank_gateway
+  setup_node_service identity trustbank_identity
   setup_node_service trustpay-backend trustpay_backend
   setup_backup_env
   install_systemd_units
   setup_caddy
 
   log "Done. Service status:"
-  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustpay-backend || true
+  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend || true
   cat <<EOF
 
 Next steps:
@@ -301,6 +311,11 @@ Next steps:
      the gateway's own per-tenant backend credentials (services/gateway —
      the public API for external bank/developer integration, distinct from
      trustpay-backend). See services/gateway/README.md.
+  2b. The identity service (services/identity — staff login, MFA, RBAC,
+     branches; Phase 2.5) needs its first staff user bootstrapped
+     separately: node scripts/bootstrapStaffUser.js --tenant-id <id>
+     --email <email> --role ops_admin, run from services/identity. See
+     services/identity/README.md.
   3. Payments' TenantProviderConfig (Paystack/self-issued-NUBAN credentials)
      is set up per-tenant via its own API — see services/payments/README.md.
   4. Fill in deploy/backup.env (S3-compatible bucket + credentials, a

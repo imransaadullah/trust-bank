@@ -53,7 +53,7 @@ PAYMENTS_URL="${PAYMENTS_SERVICE_URL:-http://127.0.0.1:8081}"
 COMPLIANCE_URL="${COMPLIANCE_SERVICE_URL:-http://127.0.0.1:8083}"
 GATEWAY_URL="${GATEWAY_SERVICE_URL:-http://127.0.0.1:8084}"
 
-SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV=""
+SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV="" OPS_ADMIN_EMAIL=""
 
 usage() {
   cat <<EOF
@@ -61,6 +61,8 @@ Usage: $0 --slug SLUG --name NAME [options]
   --license-type TYPE       UNIT_MFB | STATE_MFB | NATIONAL_MFB | PSB | BAAS_RESELLER | OTHER (default: OTHER)
   --base-currency CUR       default: NGN
   --product-backend-env P   .env file to append TENANT_ID/*_API_KEY to (printed instead if omitted)
+  --ops-admin-email EMAIL   bootstraps this tenant's first staff user (services/identity,
+                            role=ops_admin) — skipped, with instructions printed instead, if omitted
 EOF
   exit 1
 }
@@ -72,6 +74,7 @@ while [ $# -gt 0 ]; do
     --license-type) LICENSE_TYPE="$2"; shift 2 ;;
     --base-currency) BASE_CURRENCY="$2"; shift 2 ;;
     --product-backend-env) PRODUCT_BACKEND_ENV="$2"; shift 2 ;;
+    --ops-admin-email) OPS_ADMIN_EMAIL="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) die "unknown argument: $1 (see --help)" ;;
   esac
@@ -411,6 +414,36 @@ provision_sandbox_twin() {
 #    .env for these (the gateway stores per-tenant credentials in its own
 #    database, not a shared file), so this is the only place they surface.
 # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Staff identity — bootstraps this tenant's first staff user (services/
+# identity, Phase 2.5). Skipped, with instructions printed instead, if
+# --ops-admin-email wasn't given — this needs a real email address the
+# script can't invent, unlike every other credential above.
+# ---------------------------------------------------------------------------
+bootstrap_first_staff_user() {
+  if [ -z "$OPS_ADMIN_EMAIL" ]; then
+    cat <<EOF
+
+No --ops-admin-email given — skipping staff bootstrap. Run this once a real
+email is known:
+
+  cd $APP_ROOT/services/identity && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_identity?schema=public" \\
+    node scripts/bootstrapStaffUser.js --tenant-id $TENANT_ID --email <email> --role ops_admin
+EOF
+    return
+  fi
+
+  [ -f "$TENANT_DIR/staff_ops_admin_bootstrapped" ] && return
+  log "Bootstrapping $SLUG's first staff user ($OPS_ADMIN_EMAIL, ops_admin)"
+  local out
+  out="$(cd "$APP_ROOT/services/identity" && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_identity?schema=public" \
+    node scripts/bootstrapStaffUser.js --tenant-id "$TENANT_ID" --email "$OPS_ADMIN_EMAIL" --role ops_admin)"
+  printf '%s\n' "$out" > "$TENANT_DIR/staff_ops_admin_bootstrap_output.txt"
+  chmod 600 "$TENANT_DIR/staff_ops_admin_bootstrap_output.txt"
+  touch "$TENANT_DIR/staff_ops_admin_bootstrapped"
+  log "Staff bootstrap output (temp password shown once) saved to $TENANT_DIR/staff_ops_admin_bootstrap_output.txt"
+}
+
 print_gateway_summary() {
   cat <<EOF
 
@@ -445,6 +478,7 @@ main() {
   publish_default_policy
   write_env_snippet
   provision_sandbox_twin
+  bootstrap_first_staff_user
   print_gateway_summary
   log "Done. Per-tenant state cached under $TENANT_DIR for reruns."
 }

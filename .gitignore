@@ -8,4 +8,6 @@ services/compliance/node_modules/
 services/compliance/.env
 services/gateway/node_modules/
 services/gateway/.env
+services/identity/node_modules/
+services/identity/.env
 *.log
