@@ -62,15 +62,38 @@ through the actual `deploy/provision-tenant.sh` (including its new
   by a human or `provision-tenant.sh`. Verified live: every guessed
   signup-shaped route (`/v1/signup`, `/v1/staff`, `/v1/register`) 404s.
 
-**Explicit placeholders — this is slice 1 of a 3-slice phase:**
-- **No maker-checker** (slice 2) — this slice ships *who someone is*, not
-  *dual approval for what they can do*. Nothing in Ledger/Payments/
-  Compliance is gated by an approval workflow yet; see
-  `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §13's Phase 2.5 for the concrete
-  actions already identified to gate (Compliance's policy-publish routes
-  and its `POST .../cases/:caseId/review`, which today accepts a
-  free-text `reviewedBy` not tied to any real identity — the sharpest
-  existing example of the gap this phase exists to close).
+- **Maker-checker** (slice 2, shipped) — dual approval on
+  `COMPLIANCE_CASE_REVIEW`, `LEDGER_ADJUSTMENT`, and `LEDGER_REVERSAL`.
+  A maker requests an action; a *different* staff member with the right
+  role approves it; only on approval does this service call the real
+  endpoint, using its own stored, encrypted, per-tenant Ledger/Compliance
+  operate credential (mirrors the gateway's own `TenantBackendCredential`
+  pattern exactly). `requestedById !== approvedById` is enforced in code,
+  not just by role — the actual mechanical guarantee, since two people
+  with the same role can still check each other but the same person
+  never can. The payload is the exact request body the target endpoint
+  already expects — this service doesn't re-validate business meaning,
+  it only gates who can approve what and forwards the payload unchanged.
+  Verified live: a compliance officer requested a real case review, a
+  different ops_admin approved it, and the real `ComplianceCase` row's
+  `reviewedBy` field now shows the checker's real, session-verified email
+  — not the free-text string the route used to accept from anyone.
+  Also verified: self-approval rejected (403) even when the role would
+  otherwise allow it; a `teller` attempting to approve a `LEDGER_ADJUSTMENT`
+  rejected (403, wrong role — approveRoles is `ops_admin`-only for money
+  movement); a real balanced journal entry posted and the account balance
+  actually moved on approval; a rejected request executes nothing; and a
+  failed execution (Ledger stopped mid-approval) is captured as `status:
+  'failed'` with the real error, then a `retry-execution` call after
+  restarting the Ledger succeeds using the same maker-supplied
+  `idempotencyKey`.
+- **Not covered by maker-checker yet**: Compliance's KYC/device/
+  monitoring policy-publish routes — those need `admin` scope, one tier
+  above what this service's stored Compliance credential holds
+  (`operate`). A bigger privilege to grant for a first pass, and policy
+  publishing is a lower-frequency, more deliberate action than a per-case
+  or per-transaction one. A natural slice 2b once this pattern is proven,
+  not silently dropped.
 - **No `branch_id` on Ledger's own accounts** (slice 3) — `Branch` exists
   and staff can be assigned to one, but account-open/transaction flows
   don't thread it through to the Ledger yet.
@@ -130,16 +153,39 @@ curl -X POST localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN
   -d '{"code":"LAG-01","name":"Lagos Main Branch"}'   # ops_admin only
 
 curl localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN"   # any role
+
+# Maker-checker — actionType is 'COMPLIANCE_CASE_REVIEW' | 'LEDGER_ADJUSTMENT' |
+# 'LEDGER_REVERSAL'; payload is the exact request body the target endpoint expects.
+curl -X POST localhost:8085/v1/approvals -H "Authorization: Bearer $MAKER_SESSION" \
+  -d '{"actionType":"COMPLIANCE_CASE_REVIEW","payload":{"caseId":"...","status":"dismissed","reviewNotes":"..."}}'
+
+curl localhost:8085/v1/approvals?status=pending -H "Authorization: Bearer $SESSION_TOKEN"
+
+# A *different* staff member, with a role in that actionType's approveRoles —
+# self-approval is rejected (403) even if the role would otherwise allow it.
+curl -X POST localhost:8085/v1/approvals/$APPROVAL_ID/approve -H "Authorization: Bearer $CHECKER_SESSION"
+curl -X POST localhost:8085/v1/approvals/$APPROVAL_ID/reject -H "Authorization: Bearer $CHECKER_SESSION" \
+  -d '{"reason":"..."}'
+
+# If execution failed (e.g. the target backend was down), retry without a fresh approval:
+curl -X POST localhost:8085/v1/approvals/$APPROVAL_ID/retry-execution -H "Authorization: Bearer $CHECKER_SESSION"
 ```
 
 ## Layout
 
 ```
 prisma/                Branch (tenant org-unit), StaffUser (password + role + branch + MFA),
-                       StaffSession (short-lived, sliding-expiry, shown-once/hashed)
+                       StaffSession (short-lived, sliding-expiry, shown-once/hashed),
+                       TenantBackendCredential (this service's own Ledger/Compliance operate
+                       credential per tenant), ApprovalRequest (maker-checker)
 scripts/bootstrapStaffUser.js  creates the first staff user for a tenant — same
                                 chicken-and-egg fix as every other service's bootstrap script
-src/crypto/mfaSecrets.js        AES-256-GCM, same pattern as services/payments' tenantSecrets.js
+scripts/storeTenantBackendCredential.js  stores this tenant's Ledger/Compliance credential —
+                                          a script, not an HTTP route, since this service's
+                                          entire HTTP surface is staff-session-gated
+src/crypto/mfaSecrets.js        AES-256-GCM, same pattern as services/payments' tenantSecrets.js —
+                                 also encrypts TenantBackendCredential, one key per service, not
+                                 duplicated per secret type
 src/services/
   staffUserService.js            password verify (argon2id), MFA enroll/verify (otplib) —
                                   mfaSecrets required lazily so scripts/bootstrapStaffUser.js
@@ -148,9 +194,20 @@ src/services/
   branchService.js                create/list a tenant's branches
   mfaChallengeService.js          stateless, signed short-lived token bridging password ->
                                    MFA-code verification — deliberately not a DB row
+  tenantBackendCredentialService.js  store/get this service's own Ledger/Compliance credential —
+                                      mirrors the gateway's identically-named service exactly
+  approvalService.js              request/approve/reject/retryExecution, the per-actionType
+                                   requestRoles/approveRoles map, self-approval check
+  backendExecutor.js              executes an approved action against the real Ledger/Compliance
+                                   endpoint — mirrors the gateway's backendProxy.js calling-
+                                   convention handling, no circuit breaker (low-volume, human-
+                                   triggered, not a proxy absorbing arbitrary API load)
 src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
 src/routes/
   auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm
   me.js      /v1/me — the one demonstrable endpoint beyond auth plumbing
   branches.js /v1/branches — create (ops_admin) / list (any role)
+  approvals.js /v1/approvals — request/list/get/approve/reject/retry-execution, all
+               staff-session-gated; role checks live in approvalService.js, not here
+               (which role is allowed depends on actionType, not the route)
 ```

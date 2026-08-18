@@ -64,6 +64,8 @@ model StaffUser {
 
   branch   Branch?         @relation(fields: [branchId], references: [id])
   sessions StaffSession[]
+  requestedApprovals ApprovalRequest[] @relation("RequestedApprovals")
+  approvedApprovals  ApprovalRequest[] @relation("ApprovedApprovals")
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -93,4 +95,64 @@ model StaffSession {
 
   @@index([staffUserId])
   @@map("staff_sessions")
+}
+
+// ============================================
+// TENANT BACKEND CREDENTIAL
+// Identity needs its own Ledger/Compliance operate credential per tenant
+// to actually execute an approved action — identical shape to the
+// gateway's own TenantBackendCredential (services/gateway/prisma/
+// schema.prisma), same reasoning: this service is genuinely multi-tenant,
+// so it can't hold one shared credential per backend the way
+// trustpay-backend's own .env does. Encrypted with IDENTITY_ENCRYPTION_KEY
+// — the same key that already encrypts StaffUser.mfaSecret, not a second
+// required secret (same "one encryption key per service" convention
+// PAYMENTS_ENCRYPTION_KEY already follows for two different secret types).
+// ============================================
+model TenantBackendCredential {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  service        String   // 'ledger' | 'compliance'
+  encryptedToken String   @map("encrypted_token")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@unique([tenantId, service])
+  @@map("tenant_backend_credentials")
+}
+
+// ============================================
+// APPROVAL REQUEST
+// Dual-approval on the concrete gaps this phase exists to close —
+// Compliance's case-review route (today's sharpest example: reviewedBy
+// is caller-supplied free text, not tied to any real identity) and
+// Ledger's manual-adjustment/reversal primitives. payload is the exact
+// request body the target endpoint already expects — this service
+// doesn't re-validate business meaning, it only captures who requested
+// what, gates who can approve it, and forwards the payload unchanged on
+// approval (an unbalanced ledger entry still gets rejected by the Ledger
+// itself, just at execution time instead of immediately).
+// requestedById != approvedById is enforced in code, not just by role —
+// the actual mechanical guarantee of segregation of duties.
+// ============================================
+model ApprovalRequest {
+  id              String    @id @default(uuid())
+  tenantId        String    @map("tenant_id")
+  actionType      String    @map("action_type") // 'COMPLIANCE_CASE_REVIEW' | 'LEDGER_ADJUSTMENT' | 'LEDGER_REVERSAL'
+  payload         Json      // exact request body for the target endpoint
+  status          String    @default("pending") // 'pending' | 'rejected' | 'approved' | 'executed' | 'failed'
+  requestedById   String    @map("requested_by_id")
+  requestedAt     DateTime  @default(now()) @map("requested_at")
+  approvedById    String?   @map("approved_by_id")
+  approvedAt      DateTime? @map("approved_at")
+  rejectionReason String?   @map("rejection_reason")
+  executedAt      DateTime? @map("executed_at")
+  executionResult Json?     @map("execution_result")
+  executionError  String?   @map("execution_error")
+
+  requestedBy StaffUser  @relation("RequestedApprovals", fields: [requestedById], references: [id])
+  approvedBy  StaffUser? @relation("ApprovedApprovals", fields: [approvedById], references: [id])
+
+  @@index([tenantId, status])
+  @@map("approval_requests")
 }

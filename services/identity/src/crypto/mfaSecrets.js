@@ -3,6 +3,14 @@
 // with a key that never touches the database, same AES-256-GCM pattern
 // as services/payments' tenantSecrets.js and services/gateway's
 // tenantBackendCredentials.js.
+//
+// Also used by tenantBackendCredentialService.js to encrypt this
+// service's own stored Ledger/Compliance operate credentials — one
+// encryption key per service, reused across secret types, not duplicated
+// per type. Same precedent services/payments' tenantSecrets.js already
+// set (it encrypts both TenantProviderConfig and TenantLedgerCredential).
+// The name predates that second use; not renamed for the same reason
+// tenantSecrets.js wasn't either.
 const crypto = require('crypto');
 const config = require('../config');
 

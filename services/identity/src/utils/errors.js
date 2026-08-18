@@ -55,6 +55,64 @@ class BranchNotFoundError extends IdentityError {
   }
 }
 
+// Distinct from the credential-not-found errors above — this is the
+// *backend* credential (Ledger/Compliance operate token) this service
+// needs to actually execute an approved action on a tenant's behalf. See
+// deploy/provision-tenant.sh's bootstrap_identity_backend_credentials.
+class TenantBackendCredentialNotFoundError extends IdentityError {
+  constructor(tenantId, service) {
+    super(
+      `Tenant ${tenantId} has no ${service} credential provisioned for identity — run provision-tenant.sh or scripts/storeTenantBackendCredential.js`,
+      'BACKEND_CREDENTIAL_NOT_FOUND', 424,
+    );
+  }
+}
+
+class ApprovalRequestNotFoundError extends IdentityError {
+  constructor(id) {
+    super(`No approval request found with id ${id}`, 'APPROVAL_REQUEST_NOT_FOUND', 404);
+  }
+}
+
+class InvalidActionTypeError extends IdentityError {
+  constructor(actionType, validTypes) {
+    super(`actionType must be one of ${validTypes.join(', ')}, got ${actionType}`, 'INVALID_ACTION_TYPE', 400);
+  }
+}
+
+class ForbiddenActionRoleError extends IdentityError {
+  constructor(actionType, allowedRoles) {
+    super(`This action requires role: ${allowedRoles.join(' or ')}`, 'FORBIDDEN_ACTION_ROLE', 403);
+  }
+}
+
+class SelfApprovalError extends IdentityError {
+  constructor() {
+    super('You cannot approve your own request — segregation of duties requires a different staff member', 'SELF_APPROVAL_FORBIDDEN', 403);
+  }
+}
+
+class ApprovalNotPendingError extends IdentityError {
+  constructor(id, status) {
+    super(`Approval request ${id} is '${status}', not 'pending' — it can't be approved or rejected again`, 'APPROVAL_NOT_PENDING', 409);
+  }
+}
+
+class ApprovalNotFailedError extends IdentityError {
+  constructor(id, status) {
+    super(`Approval request ${id} is '${status}', not 'failed' — only a failed execution can be retried`, 'APPROVAL_NOT_FAILED', 409);
+  }
+}
+
+// Thrown after an approved action's backend call fails — the
+// ApprovalRequest row is already updated to 'failed' with the real error
+// captured before this is thrown; see approvalService.js's runExecution.
+class ExecutionFailedError extends IdentityError {
+  constructor(message) {
+    super(`Execution failed: ${message}`, 'EXECUTION_FAILED', 502);
+  }
+}
+
 module.exports = {
   IdentityError,
   InvalidCredentialsError,
@@ -65,4 +123,12 @@ module.exports = {
   StaffUserNotFoundError,
   EmailAlreadyExistsError,
   BranchNotFoundError,
+  TenantBackendCredentialNotFoundError,
+  ApprovalRequestNotFoundError,
+  InvalidActionTypeError,
+  ForbiddenActionRoleError,
+  SelfApprovalError,
+  ApprovalNotPendingError,
+  ApprovalNotFailedError,
+  ExecutionFailedError,
 };

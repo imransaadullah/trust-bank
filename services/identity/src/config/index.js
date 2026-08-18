@@ -29,4 +29,9 @@ module.exports = {
     // again from scratch.
     mfaChallengeTtlMinutes: parseInt(process.env.MFA_CHALLENGE_TTL_MINUTES || '5', 10),
   },
+  // The two backends this service executes approved actions against — no
+  // shared API key here, each call uses this tenant's own stored operate
+  // credential (src/services/tenantBackendCredentialService.js).
+  ledger: { baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080' },
+  compliance: { baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083' },
 };

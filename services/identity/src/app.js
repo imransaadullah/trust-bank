@@ -6,6 +6,7 @@ const errorHandler = require('./middleware/errorHandler');
 const authRoutes = require('./routes/auth');
 const meRoutes = require('./routes/me');
 const branchesRoutes = require('./routes/branches');
+const approvalsRoutes = require('./routes/approvals');
 
 function createApp() {
   const app = express();
@@ -18,6 +19,7 @@ function createApp() {
   app.use(authRoutes);
   app.use(meRoutes);
   app.use(branchesRoutes);
+  app.use(approvalsRoutes);
 
   app.use(errorHandler);
 
