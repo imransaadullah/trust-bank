@@ -52,4 +52,12 @@ module.exports = {
   delinquency: {
     pollIntervalMinutes: clampPollMinutes(process.env.DELINQUENCY_POLL_INTERVAL_MINUTES, 60),
   },
+  // src/services/creditBureauRunner.js — same shape as delinquency above.
+  // Real bureau reporting is typically monthly, but a literal 30-day
+  // interval isn't safely expressible via setInterval (see
+  // MAX_SAFE_POLL_MINUTES); ticks daily instead since nothing real is
+  // submitted yet — a real provider owns its own submission cadence.
+  creditBureau: {
+    pollIntervalMinutes: clampPollMinutes(process.env.CREDIT_BUREAU_POLL_INTERVAL_MINUTES, 1440),
+  },
 };

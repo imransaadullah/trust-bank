@@ -31,4 +31,22 @@ async function get(tenantId, service) {
   return decrypt(row.encryptedToken);
 }
 
-module.exports = { store, get, VALID_SERVICES };
+// Every tenant this service can actually act for — both delinquencyRunner.js
+// and creditBureauRunner.js need "which tenants have both credentials
+// stored" to know who to enumerate on each tick.
+async function listTenantsWithLedgerAndCompliance() {
+  const rows = await prisma.tenantBackendCredential.findMany({
+    where: { service: { in: VALID_SERVICES } },
+    select: { tenantId: true, service: true },
+  });
+  const byTenant = new Map();
+  for (const row of rows) {
+    if (!byTenant.has(row.tenantId)) byTenant.set(row.tenantId, new Set());
+    byTenant.get(row.tenantId).add(row.service);
+  }
+  return [...byTenant.entries()]
+    .filter(([, services]) => services.has('ledger') && services.has('compliance'))
+    .map(([tenantId]) => tenantId);
+}
+
+module.exports = { store, get, VALID_SERVICES, listTenantsWithLedgerAndCompliance };

@@ -113,6 +113,14 @@ class ExecutionFailedError extends IdentityError {
   }
 }
 
+// Base-class default for src/providers/creditBureauProvider.js — same
+// shape as services/payments' own ProviderNotImplementedError.
+class ProviderNotImplementedError extends IdentityError {
+  constructor(provider, method) {
+    super(`Provider "${provider}" does not implement ${method} yet`, 'PROVIDER_NOT_IMPLEMENTED', 501);
+  }
+}
+
 module.exports = {
   IdentityError,
   InvalidCredentialsError,
@@ -131,4 +139,5 @@ module.exports = {
   ApprovalNotPendingError,
   ApprovalNotFailedError,
   ExecutionFailedError,
+  ProviderNotImplementedError,
 };

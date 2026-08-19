@@ -221,11 +221,37 @@ through the actual `deploy/provision-tenant.sh` (including its new
   design), caught only by watching the actual posted entries during live
   verification, not by the idempotency key's own logic looking wrong on
   a read.
-- **Not covered by Phase 3**: credit bureau reporting (CRC Credit Bureau,
-  FirstCentral) — a real commercial/certification relationship with an
-  external party this platform doesn't have yet, deliberately deferred to
-  its own slice rather than folded in alongside the two mechanics above.
-  No code exists for it anywhere in the platform yet.
+- **Credit bureau reporting — shape only** (Phase 3, slice 3) — the one
+  item slice 2 named as remaining. No real CRC Credit Bureau/FirstCentral
+  relationship exists, so this ships the *shape*: `src/providers/
+  creditBureauProvider.js` is an abstract base class (one method,
+  `submitLoanRecord`) mirroring `services/payments`' `PaymentsProvider`
+  pattern — a real integration would be a new concrete provider, nothing
+  else changes. `noopCreditBureauProvider.js` is the only one that exists
+  today; it logs exactly what a real submission would send instead of
+  sending anything. `creditBureauRunner.js` (same `setInterval`
+  background-job shape as `delinquencyRunner.js`, ticking daily — a
+  literal monthly interval isn't safely expressible via `setInterval`'s
+  ~24.8-day ceiling, and nothing real is being submitted yet for cadence
+  to matter) lists every tenant's `ACTIVE` loans via the unchanged
+  `LOAN_LIST_ACTIVE` action and submits each one. **A real, named gap in
+  the payload itself**: real bureau submission needs verified customer
+  identity (full name, BVN) alongside loan terms, and this platform has
+  nowhere generic to source that from — `trustpay-backend`'s own `User`
+  model holds a `verifiedFullName`, but that's one tenant's bespoke
+  product backend, not part of this tenant-agnostic core, and no generic
+  customer-KYC-profile service exists here. The submission payload's
+  `customerIdentity` field is always `null`, with a comment explaining
+  why, rather than silently omitted or faked. Verified live: two
+  consecutive ticks both logged a correct, complete record (including the
+  loan's real, live balance change between ticks from ordinary interest
+  accrual), `delinquencyRunner` kept working unaffected in the same
+  process, and no error appeared in any service across the run.
+  `tenantsWithBothCredentials` — duplicated verbatim between this runner
+  and `delinquencyRunner.js` in slice 2 — was extracted into
+  `tenantBackendCredentialService.listTenantsWithLedgerAndCompliance`
+  during this slice, since a second real caller made the duplication
+  worth removing.
 - **No staff-facing web UI** — backend/API only, matching how the
   gateway's own build was API-first with its developer portal as a later,
   separate slice.
@@ -346,7 +372,10 @@ src/services/
   mfaChallengeService.js          stateless, signed short-lived token bridging password ->
                                    MFA-code verification — deliberately not a DB row
   tenantBackendCredentialService.js  store/get this service's own Ledger/Compliance credential —
-                                      mirrors the gateway's identically-named service exactly
+                                      mirrors the gateway's identically-named service exactly.
+                                      listTenantsWithLedgerAndCompliance() (Phase 3 slice 3)
+                                      is the "which tenants can I act for" enumeration shared
+                                      by delinquencyRunner.js and creditBureauRunner.js
   approvalService.js              request/approve/reject/retryExecution, the per-actionType
                                    requestRoles/approveRoles map, self-approval check — gained
                                    LOAN_DISBURSEMENT and COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH
@@ -357,13 +386,24 @@ src/services/
                                    arbitrary API load). Called both by approvalService.js (after
                                    approval) and directly by routes/accounts.js and routes/loans.js
                                    (account-open and loan origination aren't maker-checker actions),
-                                   and by delinquencyRunner.js (LOAN_LIST_ACTIVE/
-                                   LOAN_DELINQUENCY_FLAG, added Phase 3 slice 2)
+                                   and by delinquencyRunner.js/creditBureauRunner.js
+                                   (LOAN_LIST_ACTIVE, LOAN_DELINQUENCY_FLAG — Phase 3 slices 2-3)
   delinquencyRunner.js            process-internal periodic job (setInterval, same shape as
                                    services/payments' reconciliationRunner.js) — Phase 3 slice 2.
                                    For every tenant this service holds both a Ledger and a
                                    Compliance credential for, lists overdue ACTIVE loans and
                                    forwards daysPastDue/bucket to Compliance's case-tracking
+  creditBureauRunner.js           same periodic-job shape as delinquencyRunner.js — Phase 3
+                                   slice 3. Lists every tenant's ACTIVE loans and submits each
+                                   to providers/noopCreditBureauProvider.js (the only provider
+                                   that exists; a real one is a new file behind the same
+                                   providers/creditBureauProvider.js contract, nothing else
+                                   changes)
+src/providers/
+  creditBureauProvider.js         abstract base — one method, submitLoanRecord(record) —
+                                   mirrors services/payments' PaymentsProvider pattern
+  noopCreditBureauProvider.js     logs what a real submission would send; returns
+                                   {submitted:true, providerRef:null}
 src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
 src/routes/
   auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm

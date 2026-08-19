@@ -7,28 +7,13 @@
 // Compliance so a staff member sees it through the existing, already-
 // shipped COMPLIANCE_CASE_REVIEW flow. Neither call is maker-checker —
 // mechanical, caller-fed, same tier as LOAN_ELIGIBILITY_CHECK.
-const prisma = require('../db/prismaClient');
 const backendExecutor = require('./backendExecutor');
+const tenantBackendCredentialService = require('./tenantBackendCredentialService');
 const config = require('../config');
 const logger = require('../utils/logger');
 
-async function tenantsWithBothCredentials() {
-  const rows = await prisma.tenantBackendCredential.findMany({
-    where: { service: { in: ['ledger', 'compliance'] } },
-    select: { tenantId: true, service: true },
-  });
-  const byTenant = new Map();
-  for (const row of rows) {
-    if (!byTenant.has(row.tenantId)) byTenant.set(row.tenantId, new Set());
-    byTenant.get(row.tenantId).add(row.service);
-  }
-  return [...byTenant.entries()]
-    .filter(([, services]) => services.has('ledger') && services.has('compliance'))
-    .map(([tenantId]) => tenantId);
-}
-
 async function runOnce() {
-  const tenantIds = await tenantsWithBothCredentials();
+  const tenantIds = await tenantBackendCredentialService.listTenantsWithLedgerAndCompliance();
   for (const tenantId of tenantIds) {
     try {
       await flagTenant(tenantId);
