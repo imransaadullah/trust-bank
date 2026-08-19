@@ -33,10 +33,30 @@ const ACTIONS = {
     method: 'POST',
     path: (tenantId, payload) => `/v1/journal-entries/${payload.journalEntryId}/reverse`,
   },
+  // No payload-derived path segment needed for any of these three,
+  // unlike case review's :caseId — the policy applies to the whole
+  // tenant, not one record.
+  COMPLIANCE_KYC_POLICY_PUBLISH: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/kyc-policy`,
+  },
+  COMPLIANCE_DEVICE_POLICY_PUBLISH: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/device-policy`,
+  },
+  COMPLIANCE_MONITORING_POLICY_PUBLISH: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/monitoring-policy`,
+  },
 };
 
 /**
- * @param {'COMPLIANCE_CASE_REVIEW'|'LEDGER_ADJUSTMENT'|'LEDGER_REVERSAL'} actionType
+ * @param {'COMPLIANCE_CASE_REVIEW'|'LEDGER_ADJUSTMENT'|'LEDGER_REVERSAL'|
+ *   'COMPLIANCE_KYC_POLICY_PUBLISH'|'COMPLIANCE_DEVICE_POLICY_PUBLISH'|
+ *   'COMPLIANCE_MONITORING_POLICY_PUBLISH'} actionType
  * @param {string} tenantId
  * @param {object} payload — the exact request body the target endpoint expects
  * @returns {Promise<object>} the target endpoint's response data

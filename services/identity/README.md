@@ -87,13 +87,27 @@ through the actual `deploy/provision-tenant.sh` (including its new
   'failed'` with the real error, then a `retry-execution` call after
   restarting the Ledger succeeds using the same maker-supplied
   `idempotencyKey`.
-- **Not covered by maker-checker yet**: Compliance's KYC/device/
-  monitoring policy-publish routes — those need `admin` scope, one tier
-  above what this service's stored Compliance credential holds
-  (`operate`). A bigger privilege to grant for a first pass, and policy
-  publishing is a lower-frequency, more deliberate action than a per-case
-  or per-transaction one. A natural slice 2b once this pattern is proven,
-  not silently dropped.
+- **Maker-checker on policy publishing** (slice 2b, shipped) —
+  `COMPLIANCE_KYC_POLICY_PUBLISH`, `COMPLIANCE_DEVICE_POLICY_PUBLISH`, and
+  `COMPLIANCE_MONITORING_POLICY_PUBLISH` now covered too. These needed
+  `admin` scope, one tier above what covered case review alone
+  (`operate`) — Compliance's own scope hierarchy means `admin` satisfies
+  `operate`-gated routes too, so this service's stored Compliance
+  credential was upgraded in place rather than holding two. `approveRoles`
+  is `ops_admin`-only for all three (stricter than case review's
+  peer-reviewable set) — a policy change affects every future decision
+  tenant-wide, not one case. Verified live: a `compliance_officer`
+  (allowed to *request* a policy publish) gets a `403` trying to
+  *approve* their own request — a plain role rejection, not even reaching
+  the self-approval check — proving `approveRoles` is genuinely
+  per-actionType and not a blanket capability once a role can touch an
+  action at all. An `ops_admin` approval published a real KYC-tier
+  policy, confirmed by a live `kyc-tier-check` call that started
+  enforcing the new limit immediately; device-policy and
+  monitoring-policy publishing verified the same way. A regression check
+  confirmed `COMPLIANCE_CASE_REVIEW`'s own `compliance_officer`
+  peer-approval still works unchanged (fails on self-approval, not on
+  role, when a maker tries to approve their own case review).
 - **No `branch_id` on Ledger's own accounts** (slice 3) — `Branch` exists
   and staff can be assigned to one, but account-open/transaction flows
   don't thread it through to the Ledger yet.
@@ -155,7 +169,9 @@ curl -X POST localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN
 curl localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN"   # any role
 
 # Maker-checker — actionType is 'COMPLIANCE_CASE_REVIEW' | 'LEDGER_ADJUSTMENT' |
-# 'LEDGER_REVERSAL'; payload is the exact request body the target endpoint expects.
+# 'LEDGER_REVERSAL' | 'COMPLIANCE_KYC_POLICY_PUBLISH' | 'COMPLIANCE_DEVICE_POLICY_PUBLISH' |
+# 'COMPLIANCE_MONITORING_POLICY_PUBLISH'; payload is the exact request body the target
+# endpoint expects. See approvalService.js's PERMISSIONS for which role can request/approve each.
 curl -X POST localhost:8085/v1/approvals -H "Authorization: Bearer $MAKER_SESSION" \
   -d '{"actionType":"COMPLIANCE_CASE_REVIEW","payload":{"caseId":"...","status":"dismissed","reviewNotes":"..."}}'
 

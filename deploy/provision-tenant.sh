@@ -433,14 +433,22 @@ bootstrap_identity_backend_credentials() {
     printf '%s' "$token" > "$TENANT_DIR/ledger_operate_identity.token"; chmod 600 "$TENANT_DIR/ledger_operate_identity.token"
   fi
 
-  if [ ! -f "$TENANT_DIR/compliance_operate_identity.token" ]; then
-    log "Bootstrapping Compliance operate credential for $SLUG's identity service"
+  # admin, not operate — Compliance's own scope hierarchy (admin satisfies
+  # operate) means this single credential covers both case review and
+  # policy publishing (kyc-policy/device-policy/monitoring-policy, all
+  # admin-scoped), so identity only ever needs one Compliance credential.
+  # Cached under a distinct filename from the old operate-scope token so a
+  # rerun against a tenant provisioned before this credential was upgraded
+  # re-bootstraps with the new scope instead of silently keeping the stale
+  # operate-only one.
+  if [ ! -f "$TENANT_DIR/compliance_admin_identity.token" ]; then
+    log "Bootstrapping Compliance admin credential for $SLUG's identity service"
     local out token
     out="$(cd "$APP_ROOT/services/compliance" && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_compliance?schema=public" \
-      node scripts/bootstrapKey.js --tenant-id "$TENANT_ID" --scope operate --label "$SLUG-identity")"
+      node scripts/bootstrapKey.js --tenant-id "$TENANT_ID" --scope admin --label "$SLUG-identity")"
     token="$(extract_token "$out" cmp_live)"
-    [ -n "$token" ] || die "could not parse Compliance operate token for identity"
-    printf '%s' "$token" > "$TENANT_DIR/compliance_operate_identity.token"; chmod 600 "$TENANT_DIR/compliance_operate_identity.token"
+    [ -n "$token" ] || die "could not parse Compliance admin token for identity"
+    printf '%s' "$token" > "$TENANT_DIR/compliance_admin_identity.token"; chmod 600 "$TENANT_DIR/compliance_admin_identity.token"
   fi
 }
 
@@ -466,7 +474,7 @@ store_identity_backend_credentials() {
 
   (cd "$APP_ROOT/services/identity" && DATABASE_URL="$db_url" IDENTITY_ENCRYPTION_KEY="$enc_key" \
     node scripts/storeTenantBackendCredential.js --tenant-id "$TENANT_ID" --service compliance \
-      --token "$(cat "$TENANT_DIR/compliance_operate_identity.token")") \
+      --token "$(cat "$TENANT_DIR/compliance_admin_identity.token")") \
     || die "storing identity's Compliance credential failed"
 
   touch "$TENANT_DIR/identity_backend_credentials_stored"

@@ -26,6 +26,22 @@ const PERMISSIONS = {
     requestRoles: ['branch_manager', 'ops_admin'],
     approveRoles: ['ops_admin'],
   },
+  // approveRoles is ops_admin-only here, unlike COMPLIANCE_CASE_REVIEW's
+  // peer-reviewable set — a policy change affects every future decision
+  // tenant-wide, not one case, so it warrants the same above-the-request
+  // sign-off the ledger actions use, not compliance-peer review.
+  COMPLIANCE_KYC_POLICY_PUBLISH: {
+    requestRoles: ['compliance_officer', 'ops_admin'],
+    approveRoles: ['ops_admin'],
+  },
+  COMPLIANCE_DEVICE_POLICY_PUBLISH: {
+    requestRoles: ['compliance_officer', 'ops_admin'],
+    approveRoles: ['ops_admin'],
+  },
+  COMPLIANCE_MONITORING_POLICY_PUBLISH: {
+    requestRoles: ['compliance_officer', 'ops_admin'],
+    approveRoles: ['ops_admin'],
+  },
 };
 
 function assertValidActionType(actionType) {
