@@ -90,6 +90,12 @@ type LedgerAccount struct {
 	GLAccountID          string
 	AccountNumber        string
 	ExternalCustomerID   *string
+	// BranchID tags which branch (services/identity's own Branch, no FK —
+	// branch identity lives there, not here) opened this account. Set
+	// once at open time, never updated. Nil for self-service accounts
+	// (trustpay-backend's consumer wallet-open flow) and for accounts an
+	// ops_admin opens without specifying one.
+	BranchID             *string
 	ProductType          string
 	Status               LedgerAccountStatus
 	Currency             string

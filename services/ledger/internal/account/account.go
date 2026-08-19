@@ -21,6 +21,7 @@ type OpenInput struct {
 	GLAccountID          string
 	AccountNumber        string // optional — auto-generated if empty
 	ExternalCustomerID   *string
+	BranchID             *string // optional — which branch opened this, nil for self-service
 	ProductType          string
 	Currency             string
 	KYCTier              int
@@ -67,16 +68,17 @@ func Open(ctx context.Context, tx pgx.Tx, in OpenInput) (*domain.LedgerAccount, 
 
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ledger_accounts (
-				tenant_id, gl_account_id, account_number, external_customer_id,
+				tenant_id, gl_account_id, account_number, external_customer_id, branch_id,
 				product_type, currency, kyc_tier, is_system_account, allow_negative_balance, metadata
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			RETURNING id, status, created_at
-		`, in.TenantID, in.GLAccountID, candidate, in.ExternalCustomerID,
+		`, in.TenantID, in.GLAccountID, candidate, in.ExternalCustomerID, in.BranchID,
 			in.ProductType, currency, in.KYCTier, in.IsSystemAccount, in.AllowNegativeBalance, metadata)
 
 		acc := &domain.LedgerAccount{
 			TenantID: in.TenantID, GLAccountID: in.GLAccountID, AccountNumber: candidate,
-			ExternalCustomerID: in.ExternalCustomerID, ProductType: in.ProductType, Currency: currency,
+			ExternalCustomerID: in.ExternalCustomerID, BranchID: in.BranchID,
+			ProductType: in.ProductType, Currency: currency,
 			KYCTier: in.KYCTier, IsSystemAccount: in.IsSystemAccount, AllowNegativeBalance: in.AllowNegativeBalance,
 			Metadata: metadata,
 		}

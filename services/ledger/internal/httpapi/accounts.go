@@ -32,6 +32,11 @@ type openAccountRequest struct {
 	Currency           string `json:"currency"`
 	KYCTier            int    `json:"kycTier"`
 	AccountNumber      string `json:"accountNumber"`
+	// Optional — which branch opened this account (services/identity's
+	// own Branch, no FK). Never set by trustpay-backend's self-service
+	// consumer flow; only a staff-initiated open (services/identity's
+	// own /v1/accounts route) ever sends this.
+	BranchID string `json:"branchId"`
 }
 
 func (s *Server) handleOpenAccount(w http.ResponseWriter, r *http.Request) {
@@ -50,7 +55,7 @@ func (s *Server) handleOpenAccount(w http.ResponseWriter, r *http.Request) {
 	acc, err := wallet.OpenAccount(r.Context(), s.pool, wallet.OpenAccountInput{
 		TenantID: tenantID, ExternalCustomerID: req.ExternalCustomerID,
 		ProductType: req.ProductType, Currency: req.Currency, KYCTier: req.KYCTier,
-		AccountNumber: req.AccountNumber,
+		AccountNumber: req.AccountNumber, BranchID: req.BranchID,
 	})
 	if err != nil {
 		respondWalletError(w, err)
@@ -76,6 +81,7 @@ func (s *Server) handleGetAccountByCustomer(w http.ResponseWriter, r *http.Reque
 func accountResponse(acc *domain.LedgerAccount) map[string]any {
 	return map[string]any{
 		"id": acc.ID, "accountNumber": acc.AccountNumber, "externalCustomerId": acc.ExternalCustomerID,
-		"productType": acc.ProductType, "status": acc.Status, "currency": acc.Currency, "kycTier": acc.KYCTier,
+		"branchId": acc.BranchID, "productType": acc.ProductType, "status": acc.Status,
+		"currency": acc.Currency, "kycTier": acc.KYCTier,
 	}
 }

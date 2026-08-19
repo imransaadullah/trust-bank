@@ -6,6 +6,7 @@ migrate:
 	psql "$(MIGRATE_DATABASE_URL)" -f migrations/0002_rls_and_triggers.sql
 	psql "$(MIGRATE_DATABASE_URL)" -f migrations/0003_app_role.sql
 	psql "$(MIGRATE_DATABASE_URL)" -f migrations/0004_api_credentials.sql
+	psql "$(MIGRATE_DATABASE_URL)" -f migrations/0005_ledger_accounts_branch_id.sql
 
 test:
 	go test ./...

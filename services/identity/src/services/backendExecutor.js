@@ -51,6 +51,17 @@ const ACTIONS = {
     method: 'POST',
     path: (tenantId) => `/v1/tenants/${tenantId}/compliance/monitoring-policy`,
   },
+  // Not a maker-checker action — called directly from src/routes/accounts.js,
+  // not via approvalService. Opening a wallet account isn't money-moving or
+  // limit-changing (the architecture doc's own maker-checker trigger); it's
+  // routine account creation, so it doesn't go through the request/approve
+  // flow the other entries above do. Reuses this module purely for its
+  // stored-credential + calling-convention handling.
+  LEDGER_ACCOUNT_OPEN: {
+    service: 'ledger',
+    method: 'POST',
+    path: () => '/v1/accounts',
+  },
 };
 
 /**

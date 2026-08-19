@@ -40,6 +40,7 @@ type OpenAccountInput struct {
 	Currency           string
 	KYCTier            int
 	AccountNumber      string // optional — auto-generated if empty
+	BranchID           string // optional — empty means no branch (self-service, or ops_admin didn't specify one)
 }
 
 func OpenAccount(ctx context.Context, pool *pgxpool.Pool, in OpenAccountInput) (*domain.LedgerAccount, error) {
@@ -61,9 +62,13 @@ func OpenAccount(ctx context.Context, pool *pgxpool.Pool, in OpenAccountInput) (
 			return fmt.Errorf("wallet: chart of accounts not seeded for tenant %s: %w", in.TenantID, err)
 		}
 
+		var branchID *string
+		if in.BranchID != "" {
+			branchID = &in.BranchID
+		}
 		opened, err := account.Open(ctx, tx, account.OpenInput{
 			TenantID: in.TenantID, GLAccountID: depositsGL.ID, AccountNumber: in.AccountNumber,
-			ExternalCustomerID: &in.ExternalCustomerID, ProductType: productType,
+			ExternalCustomerID: &in.ExternalCustomerID, BranchID: branchID, ProductType: productType,
 			Currency: in.Currency, KYCTier: in.KYCTier,
 		})
 		if err != nil {

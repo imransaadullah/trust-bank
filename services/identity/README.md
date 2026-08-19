@@ -108,9 +108,30 @@ through the actual `deploy/provision-tenant.sh` (including its new
   confirmed `COMPLIANCE_CASE_REVIEW`'s own `compliance_officer`
   peer-approval still works unchanged (fails on self-approval, not on
   role, when a maker tries to approve their own case review).
-- **No `branch_id` on Ledger's own accounts** (slice 3) — `Branch` exists
-  and staff can be assigned to one, but account-open/transaction flows
-  don't thread it through to the Ledger yet.
+- **Staff-initiated account opening, with real branch tagging** (slice 3,
+  shipped) — `POST /v1/accounts` lets a `teller`/`branch_manager`/
+  `ops_admin` open a Ledger account through this service, which now tags
+  it with a real `branch_id` (`services/ledger`'s `ledger_accounts`, a
+  plain nullable column, same no-FK convention `external_customer_id`
+  already uses). Not maker-checker-gated — opening a wallet account isn't
+  money-moving or limit-changing, so this calls `backendExecutor`
+  directly rather than going through `approvalService`'s request/approve
+  flow. `teller`/`branch_manager` are forced to their own branch
+  regardless of what's in the request body — the one real access-control
+  point in an otherwise pure-tagging slice; `ops_admin` (tenant-wide, no
+  default branch) can specify any real branch or none at all. This gives
+  the branch tag an actual caller instead of shipping unused plumbing —
+  `trustpay-backend`'s own self-service consumer wallet-open flow is
+  untouched and still opens unbranched accounts exactly as before.
+  Verified live: a teller's account opened with no `branchId` in the
+  request landed tagged with their own branch (confirmed by querying the
+  Ledger directly, not just trusting the echoed response); the same
+  teller attempting to claim a *different* branch still got their own,
+  proving the override is enforced, not just the default; an `ops_admin`
+  with an explicit valid branch got it honored, a bogus branch got a
+  clean `404`, and no branch at all opened a real, unbranched account;
+  and a simulated direct call in `trustpay-backend`'s own shape (no
+  `branchId` field) succeeded unchanged.
 - **No staff-facing web UI** — backend/API only, matching how the
   gateway's own build was API-first with its developer portal as a later,
   separate slice.
@@ -168,6 +189,11 @@ curl -X POST localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN
 
 curl localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN"   # any role
 
+# Staff-initiated account opening — teller: not maker-checker-gated, opened
+# with the caller's own branch regardless of any branchId in the body.
+curl -X POST localhost:8085/v1/accounts -H "Authorization: Bearer $TELLER_SESSION" \
+  -d '{"externalCustomerId":"walk-in-customer-1","productType":"wallet"}'
+
 # Maker-checker — actionType is 'COMPLIANCE_CASE_REVIEW' | 'LEDGER_ADJUSTMENT' |
 # 'LEDGER_REVERSAL' | 'COMPLIANCE_KYC_POLICY_PUBLISH' | 'COMPLIANCE_DEVICE_POLICY_PUBLISH' |
 # 'COMPLIANCE_MONITORING_POLICY_PUBLISH'; payload is the exact request body the target
@@ -214,15 +240,19 @@ src/services/
                                       mirrors the gateway's identically-named service exactly
   approvalService.js              request/approve/reject/retryExecution, the per-actionType
                                    requestRoles/approveRoles map, self-approval check
-  backendExecutor.js              executes an approved action against the real Ledger/Compliance
-                                   endpoint — mirrors the gateway's backendProxy.js calling-
-                                   convention handling, no circuit breaker (low-volume, human-
-                                   triggered, not a proxy absorbing arbitrary API load)
+  backendExecutor.js              executes a real Ledger/Compliance call — mirrors the gateway's
+                                   backendProxy.js calling-convention handling, no circuit
+                                   breaker (low-volume, human-triggered, not a proxy absorbing
+                                   arbitrary API load). Called both by approvalService.js (after
+                                   approval) and directly by routes/accounts.js (account-open
+                                   isn't a maker-checker action)
 src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
 src/routes/
   auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm
   me.js      /v1/me — the one demonstrable endpoint beyond auth plumbing
   branches.js /v1/branches — create (ops_admin) / list (any role)
+  accounts.js /v1/accounts — staff-initiated open (teller/branch_manager/ops_admin), tags the
+              real Ledger account with a branch_id; not maker-checker-gated
   approvals.js /v1/approvals — request/list/get/approve/reject/retry-execution, all
                staff-session-gated; role checks live in approvalService.js, not here
                (which role is allowed depends on actionType, not the route)
