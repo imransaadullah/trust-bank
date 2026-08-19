@@ -62,6 +62,44 @@ const ACTIONS = {
     method: 'POST',
     path: () => '/v1/accounts',
   },
+  // Also not maker-checker — called directly from src/routes/loans.js,
+  // same reasoning as LEDGER_ACCOUNT_OPEN. Loan origination is a
+  // deterministic, policy-based eligibility check, not staff discretion.
+  LOAN_ELIGIBILITY_CHECK: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/loan-eligibility-check`,
+  },
+  // Looks up the customer's current kycTier — the eligibility check
+  // needs it, and Compliance doesn't own account state, the Ledger does.
+  LEDGER_GET_ACCOUNT_BY_CUSTOMER: {
+    service: 'ledger',
+    method: 'GET',
+    path: (tenantId, payload) => `/v1/customers/${encodeURIComponent(payload.externalCustomerId)}/account`,
+  },
+  LOAN_LIST_BY_CUSTOMER: {
+    service: 'ledger',
+    method: 'GET',
+    path: (tenantId, payload) => `/v1/customers/${encodeURIComponent(payload.externalCustomerId)}/loans`,
+  },
+  LOAN_ORIGINATE: {
+    service: 'ledger',
+    method: 'POST',
+    path: () => '/v1/loans',
+  },
+  // Disbursement IS maker-checker (see approvalService.js's PERMISSIONS)
+  // — staff-discretionary release of funds based on a credit judgment,
+  // the architecture doc's own trigger for dual approval.
+  LOAN_DISBURSEMENT: {
+    service: 'ledger',
+    method: 'POST',
+    path: (tenantId, payload) => `/v1/loans/${payload.loanAccountId}/disburse`,
+  },
+  COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/loan-eligibility-policy`,
+  },
 };
 
 /**

@@ -52,4 +52,51 @@ async function evaluateDevice({ tenantId, jurisdiction, isNewDevice, deviceAgeHo
   };
 }
 
-module.exports = { evaluateKYCTier, evaluateDevice };
+// Stateless, same as the two decisions above — the caller (services/
+// identity) supplies hasActiveLoan since loan state lives in the Ledger,
+// not here. Deliberately simple for Phase 3 slice 1: a flat cap and a
+// fixed tenant-wide rate, not income-based underwriting or a live credit
+// bureau score — both real, separate, later work.
+async function evaluateLoanEligibility({ tenantId, jurisdiction, kycTier, requestedAmountKobo, requestedTenorDays, hasActiveLoan }) {
+  const policy = await policyService.getCurrentLoanEligibilityPolicy(tenantId, jurisdiction);
+
+  if (hasActiveLoan) {
+    return {
+      allowed: false, reason: 'Customer already has an active or pending loan',
+      maxLoanAmountKobo: policy.maxLoanAmountKobo, interestRateAnnualBps: policy.interestRateAnnualBps,
+      maxTenorDays: policy.maxTenorDays, policyVersion: policy.version,
+    };
+  }
+
+  if (kycTier < policy.minKycTier) {
+    return {
+      allowed: false, reason: `Requires at least KYC tier ${policy.minKycTier}`,
+      maxLoanAmountKobo: policy.maxLoanAmountKobo, interestRateAnnualBps: policy.interestRateAnnualBps,
+      maxTenorDays: policy.maxTenorDays, policyVersion: policy.version,
+    };
+  }
+
+  if (requestedAmountKobo > policy.maxLoanAmountKobo) {
+    return {
+      allowed: false, reason: `Exceeds the maximum loan amount of ${policy.maxLoanAmountKobo} kobo`,
+      maxLoanAmountKobo: policy.maxLoanAmountKobo, interestRateAnnualBps: policy.interestRateAnnualBps,
+      maxTenorDays: policy.maxTenorDays, policyVersion: policy.version,
+    };
+  }
+
+  if (requestedTenorDays > policy.maxTenorDays) {
+    return {
+      allowed: false, reason: `Exceeds the maximum tenor of ${policy.maxTenorDays} days`,
+      maxLoanAmountKobo: policy.maxLoanAmountKobo, interestRateAnnualBps: policy.interestRateAnnualBps,
+      maxTenorDays: policy.maxTenorDays, policyVersion: policy.version,
+    };
+  }
+
+  return {
+    allowed: true, maxLoanAmountKobo: policy.maxLoanAmountKobo,
+    interestRateAnnualBps: policy.interestRateAnnualBps, maxTenorDays: policy.maxTenorDays,
+    policyVersion: policy.version,
+  };
+}
+
+module.exports = { evaluateKYCTier, evaluateDevice, evaluateLoanEligibility };

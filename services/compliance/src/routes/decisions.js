@@ -36,4 +36,20 @@ router.post('/:tenantId/compliance/device-check', requireApiKey('operate'), asyn
   }
 });
 
+router.post('/:tenantId/compliance/loan-eligibility-check', requireApiKey('operate'), async (req, res, next) => {
+  try {
+    const { jurisdiction, userId, kycTier, requestedAmountKobo, requestedTenorDays, hasActiveLoan } = req.body;
+    if (!userId || kycTier == null || requestedAmountKobo == null || requestedTenorDays == null) {
+      return res.status(400).json({ success: false, error: 'userId, kycTier, requestedAmountKobo, and requestedTenorDays are required' });
+    }
+    const decision = await decisionService.evaluateLoanEligibility({
+      tenantId: req.params.tenantId, jurisdiction: jurisdiction || 'NG', kycTier,
+      requestedAmountKobo, requestedTenorDays, hasActiveLoan: !!hasActiveLoan,
+    });
+    res.json({ success: true, data: decision });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

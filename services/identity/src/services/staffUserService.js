@@ -12,10 +12,16 @@ const {
   InvalidCredentialsError, InvalidMfaCodeError, MfaAlreadyEnrolledError, StaffUserNotFoundError, EmailAlreadyExistsError,
 } = require('../utils/errors');
 
-const ROLES = ['teller', 'branch_manager', 'compliance_officer', 'ops_admin'];
+// loan_officer/credit_manager: Phase 3's own architecture-doc language,
+// "officer originates, credit manager approves" — added rather than
+// overloading teller/branch_manager or compliance_officer, none of which
+// were designed for credit decisions.
+const ROLES = ['teller', 'branch_manager', 'compliance_officer', 'ops_admin', 'loan_officer', 'credit_manager'];
 // Roles that operate across the whole tenant rather than one branch —
-// everything else requires a branchId.
-const TENANT_WIDE_ROLES = ['ops_admin', 'compliance_officer'];
+// everything else requires a branchId. credit_manager is tenant-wide —
+// centralized underwriting is the more common real-bank shape;
+// loan_officer stays branch-scoped, like teller/branch_manager.
+const TENANT_WIDE_ROLES = ['ops_admin', 'compliance_officer', 'credit_manager'];
 
 /** Used by the bootstrap script and any future staff-management route. */
 async function create({ tenantId, email, password, role, branchId }) {

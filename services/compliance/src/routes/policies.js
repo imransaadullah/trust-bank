@@ -36,4 +36,20 @@ router.post('/:tenantId/compliance/device-policy', requireApiKey('admin'), async
   }
 });
 
+router.post('/:tenantId/compliance/loan-eligibility-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction, minKycTier, maxLoanAmountKobo, maxTenorDays, interestRateAnnualBps, effectiveFrom } = req.body;
+    if (minKycTier == null || maxLoanAmountKobo == null || maxTenorDays == null || interestRateAnnualBps == null) {
+      return res.status(400).json({ success: false, error: 'minKycTier, maxLoanAmountKobo, maxTenorDays, and interestRateAnnualBps are required' });
+    }
+    const policy = await policyService.publishLoanEligibilityPolicy({
+      tenantId: req.params.tenantId, jurisdiction: jurisdiction || 'NG',
+      minKycTier, maxLoanAmountKobo, maxTenorDays, interestRateAnnualBps, effectiveFrom,
+    });
+    res.status(201).json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

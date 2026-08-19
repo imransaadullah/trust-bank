@@ -1,7 +1,8 @@
 # Identity
 
-Staff login, MFA, sessions, RBAC, and branch/org-unit modeling — the first
-*human* identity in trust-bank. Phase 2.5, slice 1
+Staff login, MFA, sessions, RBAC, branch/org-unit modeling, and
+maker-checker — the first *human* identity in trust-bank, and the
+staff-facing side of Phase 3's loan origination
 (`CORE_BANKING_PLATFORM_ARCHITECTURE.md` §13). Every other credential in
 this platform (Ledger's admin/operate/platform-admin, Payments/Compliance's
 admin/operate, the gateway's tiered API keys) is a machine credential —
@@ -132,6 +133,59 @@ through the actual `deploy/provision-tenant.sh` (including its new
   clean `404`, and no branch at all opened a real, unbranched account;
   and a simulated direct call in `trustpay-backend`'s own shape (no
   `branchId` field) succeeded unchanged.
+- **Loan origination, with a real credit decision and dual approval on
+  disbursement** (Phase 3, slice 1) — `POST /v1/loans` lets a
+  `loan_officer`/`credit_manager` originate a loan for a customer,
+  branch-tagged the same way account-open already is. Before the Ledger
+  ever creates the (`PENDING`) loan account, this route calls Compliance's
+  new `loan-eligibility-check` — a real, versioned, tenant-configurable
+  policy (`LoanEligibilityPolicy`: min KYC tier, max amount, max tenor, a
+  fixed rate — deliberately simple for a first pass, not income-based
+  underwriting or a live credit-bureau score, neither of which exist
+  anywhere in this platform yet), and checks the Ledger's own loan list
+  for the customer to enforce one active/pending loan at a time. Keeps
+  the Ledger itself dumb — it never calls another service; the credit
+  decision happens here, first, matching the platform's existing
+  "Compliance is consulted before the Ledger writes" rule. Origination
+  itself is **not** maker-checker (a deterministic, policy-based check,
+  no staff discretion) — **disbursement is**: `LOAN_DISBURSEMENT`
+  requires a *different* `credit_manager` to approve, matching the
+  architecture doc's own "officer originates, credit manager approves"
+  language, which is also why `loan_officer`/`credit_manager` are new
+  roles here rather than overloading `branch_manager`/`compliance_officer`.
+  `COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH` was added to maker-checker
+  the same way the other three Compliance policy-publish actions were.
+  Verified live: eligibility rejections for below-minimum KYC tier, over
+  the amount cap, and an existing active loan all fired for real before
+  any Ledger write happened; a `loan_officer` couldn't approve their own
+  disbursement request (wrong role) and a `credit_manager` couldn't
+  approve their own either (self-approval, independent of role); a
+  different, uninvolved `credit_manager`'s approval moved real money —
+  the loan balance and the customer's wallet balance both changed by the
+  disbursed amount, confirmed against the Ledger directly; a rejected
+  disbursement executed nothing; daily interest accrual posted a real
+  entry at the exact expected rate (confirmed against both the loan and
+  the tenant's `SYS-INTEREST-INCOME` account); and repayment — partial,
+  then full — correctly reduced the balance and closed the loan at zero,
+  with the Ledger's own insufficient-balance guard correctly blocking an
+  over-repayment attempt against the wallet.
+- **A real bug this caught**: `ListByExternalCustomerIDAndProduct` (used
+  by this route's loan lookup, and by `ListSavingsAccounts`) never
+  selected `branch_id` from the database — the column was written
+  correctly at origination, but read back as `null` every time,
+  regardless of what was actually stored. Found by comparing a loan's own
+  origination response (which had the real branch) against what the
+  customer's loan list returned moments later (`null`) — a live
+  discrepancy, not something a unit test in isolation would have caught.
+  Fixed there and in two structurally identical read functions
+  (`GetByExternalCustomerID`, `ListByProductType`) that had the same gap
+  but weren't yet exercised by anything checking `branchId` specifically.
+- **Not covered by Phase 3 slice 1**: delinquency handling (a missed
+  payment today just sits as a growing balance — no grace period, no
+  default status, no collections workflow), loan-loss provisioning (no
+  loan-loss reserve accounting), and credit bureau reporting (CRC/
+  FirstCentral — no code exists for this anywhere in the platform). All
+  three are named, real, separate future work, not silently dropped.
 - **No staff-facing web UI** — backend/API only, matching how the
   gateway's own build was API-first with its developer portal as a later,
   separate slice.
@@ -194,12 +248,27 @@ curl localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN"   # an
 curl -X POST localhost:8085/v1/accounts -H "Authorization: Bearer $TELLER_SESSION" \
   -d '{"externalCustomerId":"walk-in-customer-1","productType":"wallet"}'
 
+# Loan origination — loan_officer: forced to their own branch; credit_manager:
+# tenant-wide, may pass any real branchId or none. Deterministic, policy-based
+# eligibility check against Compliance; NOT maker-checker (see routes/loans.js's
+# own comment on why). 422 with code LOAN_NOT_ELIGIBLE if the policy rejects it.
+curl -X POST localhost:8085/v1/loans -H "Authorization: Bearer $LOAN_OFFICER_SESSION" \
+  -d '{"externalCustomerId":"cust-1","principalKobo":1000000,"tenorDays":30}'
+
 # Maker-checker — actionType is 'COMPLIANCE_CASE_REVIEW' | 'LEDGER_ADJUSTMENT' |
 # 'LEDGER_REVERSAL' | 'COMPLIANCE_KYC_POLICY_PUBLISH' | 'COMPLIANCE_DEVICE_POLICY_PUBLISH' |
-# 'COMPLIANCE_MONITORING_POLICY_PUBLISH'; payload is the exact request body the target
-# endpoint expects. See approvalService.js's PERMISSIONS for which role can request/approve each.
+# 'COMPLIANCE_MONITORING_POLICY_PUBLISH' | 'LOAN_DISBURSEMENT' |
+# 'COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH'; payload is the exact request body the
+# target endpoint expects. See approvalService.js's PERMISSIONS for which role can
+# request/approve each.
 curl -X POST localhost:8085/v1/approvals -H "Authorization: Bearer $MAKER_SESSION" \
   -d '{"actionType":"COMPLIANCE_CASE_REVIEW","payload":{"caseId":"...","status":"dismissed","reviewNotes":"..."}}'
+
+# Loan disbursement request — a loan_officer or credit_manager requests it (maker),
+# a *different* credit_manager approves (checker) via the same generic approve route
+# above. Self-approval and wrong-role approval are both rejected.
+curl -X POST localhost:8085/v1/approvals -H "Authorization: Bearer $LOAN_OFFICER_SESSION" \
+  -d '{"actionType":"LOAN_DISBURSEMENT","payload":{"loanAccountId":"..."}}'
 
 curl localhost:8085/v1/approvals?status=pending -H "Authorization: Bearer $SESSION_TOKEN"
 
@@ -239,13 +308,15 @@ src/services/
   tenantBackendCredentialService.js  store/get this service's own Ledger/Compliance credential —
                                       mirrors the gateway's identically-named service exactly
   approvalService.js              request/approve/reject/retryExecution, the per-actionType
-                                   requestRoles/approveRoles map, self-approval check
+                                   requestRoles/approveRoles map, self-approval check — gained
+                                   LOAN_DISBURSEMENT and COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH
+                                   in Phase 3 slice 1
   backendExecutor.js              executes a real Ledger/Compliance call — mirrors the gateway's
                                    backendProxy.js calling-convention handling, no circuit
                                    breaker (low-volume, human-triggered, not a proxy absorbing
                                    arbitrary API load). Called both by approvalService.js (after
-                                   approval) and directly by routes/accounts.js (account-open
-                                   isn't a maker-checker action)
+                                   approval) and directly by routes/accounts.js and routes/loans.js
+                                   (account-open and loan origination aren't maker-checker actions)
 src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
 src/routes/
   auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm
@@ -256,4 +327,8 @@ src/routes/
   approvals.js /v1/approvals — request/list/get/approve/reject/retry-execution, all
                staff-session-gated; role checks live in approvalService.js, not here
                (which role is allowed depends on actionType, not the route)
+  loans.js    /v1/loans — staff-initiated origination (loan_officer/credit_manager);
+              checks existing-loan + Compliance eligibility before the Ledger ever
+              writes a PENDING loan account; not maker-checker (disbursement is,
+              via the generic /v1/approvals routes above, not a route here)
 ```

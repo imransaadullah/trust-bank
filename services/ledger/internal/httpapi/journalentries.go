@@ -7,6 +7,7 @@ import (
 
 	"trustbank/ledger/internal/domain"
 	"trustbank/ledger/internal/ledger"
+	"trustbank/ledger/internal/loan"
 	"trustbank/ledger/internal/wallet"
 )
 
@@ -127,6 +128,12 @@ func respondWalletError(w http.ResponseWriter, err error) {
 		respondError(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, wallet.ErrSavingsLocked):
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
+	case errors.Is(err, loan.ErrLoanNotFound):
+		respondError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, loan.ErrLoanNotOwned):
+		respondError(w, http.StatusForbidden, err.Error())
+	case errors.Is(err, loan.ErrLoanNotPending), errors.Is(err, loan.ErrLoanNotActive):
+		respondError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, ledger.ErrInsufficientBalance):
 		respondError(w, http.StatusUnprocessableEntity, err.Error())
 	case errors.Is(err, ledger.ErrUnbalancedEntry), errors.Is(err, ledger.ErrTooFewLines), errors.Is(err, ledger.ErrNonPositiveAmount):

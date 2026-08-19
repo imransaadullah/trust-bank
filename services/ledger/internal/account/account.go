@@ -28,6 +28,11 @@ type OpenInput struct {
 	IsSystemAccount      bool
 	AllowNegativeBalance bool
 	Metadata             []byte // optional JSON — e.g. savings.go's rate/lock terms. Defaults to '{}'.
+	// Status defaults to ACTIVE (the DB column's own default) if empty.
+	// internal/loan uses PENDING here — a loan account exists but can't
+	// move money until Disburse flips it to ACTIVE (postWithinTx's own
+	// guard already rejects posting against a non-ACTIVE account).
+	Status domain.LedgerAccountStatus
 }
 
 const uniqueViolationCode = "23505"
@@ -42,6 +47,10 @@ func Open(ctx context.Context, tx pgx.Tx, in OpenInput) (*domain.LedgerAccount, 
 	currency := in.Currency
 	if currency == "" {
 		currency = "NGN"
+	}
+	status := in.Status
+	if status == "" {
+		status = domain.StatusActive
 	}
 
 	accountNumber := in.AccountNumber
@@ -69,11 +78,11 @@ func Open(ctx context.Context, tx pgx.Tx, in OpenInput) (*domain.LedgerAccount, 
 		row := tx.QueryRow(ctx, `
 			INSERT INTO ledger_accounts (
 				tenant_id, gl_account_id, account_number, external_customer_id, branch_id,
-				product_type, currency, kyc_tier, is_system_account, allow_negative_balance, metadata
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+				product_type, currency, kyc_tier, is_system_account, allow_negative_balance, metadata, status
+			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 			RETURNING id, status, created_at
 		`, in.TenantID, in.GLAccountID, candidate, in.ExternalCustomerID, in.BranchID,
-			in.ProductType, currency, in.KYCTier, in.IsSystemAccount, in.AllowNegativeBalance, metadata)
+			in.ProductType, currency, in.KYCTier, in.IsSystemAccount, in.AllowNegativeBalance, metadata, status)
 
 		acc := &domain.LedgerAccount{
 			TenantID: in.TenantID, GLAccountID: in.GLAccountID, AccountNumber: candidate,
@@ -146,7 +155,7 @@ func Get(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID string) (*dom
 func GetByExternalCustomerID(ctx context.Context, tx pgx.Tx, tenantID, externalCustomerID, productType string) (*domain.LedgerAccount, domain.Direction, error) {
 	row := tx.QueryRow(ctx, `
 		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
-		       la.product_type, la.kyc_tier, coa.normal_balance
+		       la.product_type, la.kyc_tier, la.branch_id, coa.normal_balance
 		FROM ledger_accounts la
 		JOIN chart_of_accounts coa ON coa.id = la.gl_account_id
 		WHERE la.tenant_id = $1 AND la.external_customer_id = $2 AND la.product_type = $3
@@ -155,7 +164,7 @@ func GetByExternalCustomerID(ctx context.Context, tx pgx.Tx, tenantID, externalC
 	acc := &domain.LedgerAccount{TenantID: tenantID, ExternalCustomerID: &externalCustomerID}
 	var normal domain.Direction
 	if err := row.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
-		&acc.ProductType, &acc.KYCTier, &normal); err != nil {
+		&acc.ProductType, &acc.KYCTier, &acc.BranchID, &normal); err != nil {
 		return nil, "", fmt.Errorf("account: get by external customer %s (product %s): %w", externalCustomerID, productType, err)
 	}
 	return acc, normal, nil
@@ -167,7 +176,7 @@ func GetByExternalCustomerID(ctx context.Context, tx pgx.Tx, tenantID, externalC
 func ListByExternalCustomerIDAndProduct(ctx context.Context, tx pgx.Tx, tenantID, externalCustomerID, productType string) ([]domain.LedgerAccount, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
-		       la.product_type, la.kyc_tier, la.metadata, la.created_at
+		       la.product_type, la.kyc_tier, la.branch_id, la.metadata, la.created_at
 		FROM ledger_accounts la
 		WHERE la.tenant_id = $1 AND la.external_customer_id = $2 AND la.product_type = $3
 		ORDER BY la.created_at
@@ -181,7 +190,7 @@ func ListByExternalCustomerIDAndProduct(ctx context.Context, tx pgx.Tx, tenantID
 	for rows.Next() {
 		acc := domain.LedgerAccount{TenantID: tenantID, ExternalCustomerID: &externalCustomerID}
 		if err := rows.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
-			&acc.ProductType, &acc.KYCTier, &acc.Metadata, &acc.CreatedAt); err != nil {
+			&acc.ProductType, &acc.KYCTier, &acc.BranchID, &acc.Metadata, &acc.CreatedAt); err != nil {
 			return nil, fmt.Errorf("account: scan list row: %w", err)
 		}
 		accounts = append(accounts, acc)
@@ -195,7 +204,7 @@ func ListByExternalCustomerIDAndProduct(ctx context.Context, tx pgx.Tx, tenantID
 func ListByProductType(ctx context.Context, tx pgx.Tx, tenantID, productType string) ([]domain.LedgerAccount, error) {
 	rows, err := tx.Query(ctx, `
 		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
-		       la.product_type, la.external_customer_id, la.metadata, la.created_at
+		       la.product_type, la.external_customer_id, la.branch_id, la.metadata, la.created_at
 		FROM ledger_accounts la
 		WHERE la.tenant_id = $1 AND la.product_type = $2 AND la.status = 'ACTIVE'
 		ORDER BY la.created_at
@@ -209,7 +218,7 @@ func ListByProductType(ctx context.Context, tx pgx.Tx, tenantID, productType str
 	for rows.Next() {
 		acc := domain.LedgerAccount{TenantID: tenantID}
 		if err := rows.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
-			&acc.ProductType, &acc.ExternalCustomerID, &acc.Metadata, &acc.CreatedAt); err != nil {
+			&acc.ProductType, &acc.ExternalCustomerID, &acc.BranchID, &acc.Metadata, &acc.CreatedAt); err != nil {
 			return nil, fmt.Errorf("account: scan list-by-product row: %w", err)
 		}
 		accounts = append(accounts, acc)
@@ -234,6 +243,48 @@ func GetSavingsAccount(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID
 	if err := row.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
 		&acc.ProductType, &acc.ExternalCustomerID, &acc.Metadata, &acc.CreatedAt); err != nil {
 		return nil, fmt.Errorf("account: get savings account %s: %w", ledgerAccountID, err)
+	}
+	return acc, nil
+}
+
+// UpdateStatus flips a ledger account's status — used by internal/loan to
+// move a loan PENDING -> ACTIVE at disbursement (postWithinTx's own guard
+// requires ACTIVE before it will post against an account) and ACTIVE ->
+// CLOSED once a loan is fully repaid. Every other product (wallet,
+// savings) never needs this — accounts stay ACTIVE for their whole
+// lifecycle — so this stays a narrow, purpose-built mutator rather than
+// a generic "update anything" function.
+func UpdateStatus(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID string, status domain.LedgerAccountStatus) error {
+	tag, err := tx.Exec(ctx, `
+		UPDATE ledger_accounts SET status = $3, updated_at = now()
+		WHERE tenant_id = $1 AND id = $2
+	`, tenantID, ledgerAccountID, status)
+	if err != nil {
+		return fmt.Errorf("account: update status %s: %w", ledgerAccountID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("account: update status %s: %w", ledgerAccountID, pgx.ErrNoRows)
+	}
+	return nil
+}
+
+// GetLoanAccount loads a ledger account with the fields loan-specific
+// operations need — same shape as GetSavingsAccount (metadata for the
+// principal/rate/tenor terms, product type and external customer id to
+// confirm ownership), kept as its own function rather than a shared one
+// so each product's intent stays obvious at the call site.
+func GetLoanAccount(ctx context.Context, tx pgx.Tx, tenantID, ledgerAccountID string) (*domain.LedgerAccount, error) {
+	row := tx.QueryRow(ctx, `
+		SELECT la.id, la.status, la.allow_negative_balance, la.currency, la.account_number,
+		       la.product_type, la.external_customer_id, la.branch_id, la.metadata, la.created_at
+		FROM ledger_accounts la
+		WHERE la.tenant_id = $1 AND la.id = $2
+	`, tenantID, ledgerAccountID)
+
+	acc := &domain.LedgerAccount{TenantID: tenantID}
+	if err := row.Scan(&acc.ID, &acc.Status, &acc.AllowNegativeBalance, &acc.Currency, &acc.AccountNumber,
+		&acc.ProductType, &acc.ExternalCustomerID, &acc.BranchID, &acc.Metadata, &acc.CreatedAt); err != nil {
+		return nil, fmt.Errorf("account: get loan account %s: %w", ledgerAccountID, err)
 	}
 	return acc, nil
 }

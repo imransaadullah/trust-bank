@@ -47,9 +47,31 @@ async function getCurrentDevicePolicy(tenantId, jurisdiction, atDate = new Date(
   return policy;
 }
 
+async function publishLoanEligibilityPolicy({ tenantId, jurisdiction, minKycTier, maxLoanAmountKobo, maxTenorDays, interestRateAnnualBps, effectiveFrom }) {
+  const nextVersion = await nextVersionFor(prisma.loanEligibilityPolicy, { tenantId, jurisdiction });
+  return prisma.loanEligibilityPolicy.create({
+    data: {
+      tenantId, jurisdiction, minKycTier, maxLoanAmountKobo, maxTenorDays, interestRateAnnualBps,
+      version: nextVersion, effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
+    },
+  });
+}
+
+async function getCurrentLoanEligibilityPolicy(tenantId, jurisdiction, atDate = new Date()) {
+  const policy = await prisma.loanEligibilityPolicy.findFirst({
+    where: { tenantId, jurisdiction, effectiveFrom: { lte: atDate } },
+    orderBy: { version: 'desc' },
+  });
+  if (!policy) throw new NoPolicyConfiguredError('loan-eligibility', tenantId);
+  return policy;
+}
+
 async function nextVersionFor(model, where) {
   const latest = await model.findFirst({ where, orderBy: { version: 'desc' } });
   return latest ? latest.version + 1 : 1;
 }
 
-module.exports = { publishKYCPolicy, getCurrentKYCPolicy, publishDevicePolicy, getCurrentDevicePolicy };
+module.exports = {
+  publishKYCPolicy, getCurrentKYCPolicy, publishDevicePolicy, getCurrentDevicePolicy,
+  publishLoanEligibilityPolicy, getCurrentLoanEligibilityPolicy,
+};

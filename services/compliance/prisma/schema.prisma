@@ -84,6 +84,32 @@ model TransactionMonitoringPolicy {
 }
 
 // ============================================
+// LOAN ELIGIBILITY POLICY
+// Same versioning discipline as the other three. Phase 3, slice 1's
+// credit decision — deliberately simple for a first pass: a flat cap and
+// a fixed tenant-wide rate, not income-based underwriting (that needs
+// transaction-history analysis, out of scope) and not a live credit
+// bureau score (CRC/FirstCentral — no code exists for that anywhere in
+// this platform yet, a real future integration, not stubbed here).
+// ============================================
+model LoanEligibilityPolicy {
+  id                    String   @id @default(uuid())
+  tenantId              String   @map("tenant_id")
+  jurisdiction          String   @default("NG")
+  minKycTier            Int      @map("min_kyc_tier")
+  maxLoanAmountKobo     Int      @map("max_loan_amount_kobo")
+  maxTenorDays          Int      @map("max_tenor_days")
+  interestRateAnnualBps Int      @map("interest_rate_annual_bps")
+  version               Int
+  effectiveFrom         DateTime @map("effective_from")
+  createdAt             DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, jurisdiction, version])
+  @@index([tenantId, jurisdiction, effectiveFrom])
+  @@map("loan_eligibility_policies")
+}
+
+// ============================================
 // SANCTIONS WATCHLIST ENTRY
 // Not tenant-scoped — a sanctioned name is sanctioned regardless of
 // which tenant's customer they are. Seed/test data only in this pass,

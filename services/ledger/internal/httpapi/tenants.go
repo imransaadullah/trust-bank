@@ -49,6 +49,7 @@ func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {
 			"floatAccountId":           sysAccounts.Float.ID,
 			"feeIncomeAccountId":       sysAccounts.FeeIncome.ID,
 			"interestExpenseAccountId": sysAccounts.InterestExpense.ID,
+			"interestIncomeAccountId":  sysAccounts.InterestIncome.ID,
 		},
 	})
 }

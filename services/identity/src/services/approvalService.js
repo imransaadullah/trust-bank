@@ -42,6 +42,18 @@ const PERMISSIONS = {
     requestRoles: ['compliance_officer', 'ops_admin'],
     approveRoles: ['ops_admin'],
   },
+  // Staff-discretionary release of funds based on a credit judgment —
+  // the architecture doc's own trigger for maker-checker, and the
+  // concrete reason Phase 2.5 was sequenced before Phase 3. Origination
+  // itself is NOT maker-checker (see routes/loans.js) — only disbursement.
+  LOAN_DISBURSEMENT: {
+    requestRoles: ['loan_officer', 'credit_manager'],
+    approveRoles: ['credit_manager'],
+  },
+  COMPLIANCE_LOAN_ELIGIBILITY_POLICY_PUBLISH: {
+    requestRoles: ['credit_manager', 'ops_admin'],
+    approveRoles: ['ops_admin'],
+  },
 };
 
 function assertValidActionType(actionType) {

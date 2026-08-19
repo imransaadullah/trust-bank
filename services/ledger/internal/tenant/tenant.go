@@ -21,7 +21,12 @@ const (
 	FloatAccountNumber           = "SYS-FLOAT"
 	FeeIncomeAccountNumber       = "SYS-FEE-INCOME"
 	InterestExpenseAccountNumber = "SYS-INTEREST-EXPENSE"
-	CustomerDepositsGLCode       = "2100"
+	// InterestIncomeAccountNumber recognizes interest a tenant earns on
+	// loans (internal/accrual's loan-interest pass) — the receiving side
+	// of InterestExpenseAccountNumber's savings-side counterpart, GL 4200
+	// instead of 5100.
+	InterestIncomeAccountNumber = "SYS-INTEREST-INCOME"
+	CustomerDepositsGLCode      = "2100"
 )
 
 type CreateInput struct {
@@ -43,6 +48,7 @@ type SystemAccounts struct {
 	Float           *domain.LedgerAccount
 	FeeIncome       *domain.LedgerAccount
 	InterestExpense *domain.LedgerAccount
+	InterestIncome  *domain.LedgerAccount
 }
 
 func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Tenant, *SystemAccounts, error) {
@@ -109,7 +115,15 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 			return fmt.Errorf("tenant: open interest expense account: %w", err)
 		}
 
-		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc, InterestExpense: interestAcc}
+		interestIncomeAcc, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: t.ID, GLAccountID: chart["4200"].ID, AccountNumber: InterestIncomeAccountNumber,
+			ProductType: "interest_income", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		})
+		if err != nil {
+			return fmt.Errorf("tenant: open interest income account: %w", err)
+		}
+
+		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc, InterestExpense: interestAcc, InterestIncome: interestIncomeAcc}
 		return nil
 	})
 	if err != nil {
