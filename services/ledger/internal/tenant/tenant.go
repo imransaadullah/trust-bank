@@ -27,6 +27,11 @@ const (
 	// instead of 5100.
 	InterestIncomeAccountNumber = "SYS-INTEREST-INCOME"
 	CustomerDepositsGLCode      = "2100"
+	// LoanLossReserveAccountNumber / LoanLossProvisionAccountNumber back
+	// internal/accrual's provisioning pass — the contra-asset (GL 1250)
+	// and expense (GL 5200) sides of the same entry.
+	LoanLossReserveAccountNumber   = "SYS-LOAN-LOSS-RESERVE"
+	LoanLossProvisionAccountNumber = "SYS-LOAN-LOSS-PROVISION"
 )
 
 type CreateInput struct {
@@ -124,11 +129,61 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 		}
 
 		sysAccounts = &SystemAccounts{Float: floatAcc, FeeIncome: feeAcc, InterestExpense: interestAcc, InterestIncome: interestIncomeAcc}
-		return nil
+		return EnsureLoanLossAccounts(ctx, tx, t.ID, baseCurrency)
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
 	return t, sysAccounts, nil
+}
+
+// EnsureLoanLossAccounts creates GL 1250/5200 and their system ledger
+// accounts if they don't already exist for this tenant — idempotent, so
+// it's safe both inside Create's tx for a brand-new tenant (where they
+// never exist yet) and standalone against an existing tenant provisioned
+// before this GL pair existed (cmd/backfill-loan-loss-accounts). Not
+// folded into SeedDefault itself: SeedDefault only ever runs once, at
+// creation, and has no story for "some rows already exist."
+func EnsureLoanLossAccounts(ctx context.Context, tx pgx.Tx, tenantID, baseCurrency string) error {
+	reserveGL, err := ensureGLAccount(ctx, tx, tenantID, "1250", "Loan Loss Reserve", domain.Asset, domain.Credit, "1000")
+	if err != nil {
+		return err
+	}
+	provisionGL, err := ensureGLAccount(ctx, tx, tenantID, "5200", "Loan Loss Provision Expense", domain.Expense, domain.Debit, "5000")
+	if err != nil {
+		return err
+	}
+
+	if _, _, err := account.GetByAccountNumber(ctx, tx, tenantID, LoanLossReserveAccountNumber); err != nil {
+		if _, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: tenantID, GLAccountID: reserveGL.ID, AccountNumber: LoanLossReserveAccountNumber,
+			ProductType: "loan_loss_reserve", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		}); err != nil {
+			return fmt.Errorf("tenant: open loan loss reserve account: %w", err)
+		}
+	}
+
+	if _, _, err := account.GetByAccountNumber(ctx, tx, tenantID, LoanLossProvisionAccountNumber); err != nil {
+		if _, err := account.Open(ctx, tx, account.OpenInput{
+			TenantID: tenantID, GLAccountID: provisionGL.ID, AccountNumber: LoanLossProvisionAccountNumber,
+			ProductType: "loan_loss_provision", Currency: baseCurrency, IsSystemAccount: true, AllowNegativeBalance: true,
+		}); err != nil {
+			return fmt.Errorf("tenant: open loan loss provision account: %w", err)
+		}
+	}
+
+	return nil
+}
+
+func ensureGLAccount(ctx context.Context, tx pgx.Tx, tenantID, code, name string, t domain.GLAccountType, normal domain.Direction, parentCode string) (*coa.Entry, error) {
+	existing, err := coa.ByCode(ctx, tx, tenantID, code)
+	if err == nil {
+		return existing, nil
+	}
+	parent, err := coa.ByCode(ctx, tx, tenantID, parentCode)
+	if err != nil {
+		return nil, fmt.Errorf("tenant: parent GL %s missing for %s: %w", parentCode, code, err)
+	}
+	return coa.Create(ctx, tx, tenantID, code, name, t, normal, &parent.ID, false)
 }

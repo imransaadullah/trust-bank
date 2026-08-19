@@ -180,12 +180,52 @@ through the actual `deploy/provision-tenant.sh` (including its new
   Fixed there and in two structurally identical read functions
   (`GetByExternalCustomerID`, `ListByProductType`) that had the same gap
   but weren't yet exercised by anything checking `branchId` specifically.
-- **Not covered by Phase 3 slice 1**: delinquency handling (a missed
-  payment today just sits as a growing balance — no grace period, no
-  default status, no collections workflow), loan-loss provisioning (no
-  loan-loss reserve accounting), and credit bureau reporting (CRC/
-  FirstCentral — no code exists for this anywhere in the platform). All
-  three are named, real, separate future work, not silently dropped.
+- **Delinquency detection and loan-loss provisioning** (Phase 3, slice 2) —
+  the two of slice 1's three named gaps that are pure platform mechanics,
+  no external party involved. The Ledger computes `daysPastDue`/a bucket
+  (`current`/`1-30`/`31-60`/`61-90`/`90+`) for every loan from data it
+  already had (`MaturityDate`, set at disbursement) — no new tracking
+  needed to detect lateness. A new periodic pass on the same accrual
+  goroutine trues up a per-loan loan-loss reserve against a fixed
+  expected-credit-loss matrix (new GL `1250`/`5200`, contra-asset/expense).
+  Here in identity, a new `delinquencyRunner.js` (same `setInterval`
+  background-job shape as `services/payments`' `reconciliationRunner.js`)
+  polls the Ledger's new tenant-wide `GET /v1/loans` for every tenant this
+  service holds both a Ledger and a Compliance credential for, and
+  forwards any overdue loan's `daysPastDue`/`bucket` to a new Compliance
+  route (`loan-delinquency-flag`) — mechanical, caller-fed, not
+  maker-checker, same tier as `loan-eligibility-check`. What Compliance
+  does with that fact **is** the already-shipped `COMPLIANCE_CASE_REVIEW`
+  maker-checker flow, unmodified — a `loan_delinquency` case is reviewed,
+  dismissed, or escalated exactly like a `transaction_monitoring` or
+  `sanctions_hit` case, zero new approval plumbing. Verified live: a real
+  provisioning journal entry posted at the correct bucket rate; a
+  dismissed case correctly re-opened on the next tick because the
+  underlying loan was still overdue (dismissing a case doesn't suppress
+  re-flagging); and a full repayment stopped both interest accrual and
+  provisioning for the now-`CLOSED` loan without touching the reserve
+  already accumulated (release-on-repayment is a named limitation, not
+  built in this slice).
+- **A real bug this caught**: the first version of the provisioning pass
+  keyed its idempotency off `{accountId}:{date}` — matching every other
+  idempotency key in `internal/accrual` — but provisioning's target can
+  legitimately change more than once on the same calendar day (a
+  shorter-than-24h poll interval during this slice's own verification
+  advanced the bucket twice in one day). The Ledger's existing
+  dedup-by-key behavior silently returned the *first* entry under that
+  key without erroring, while the code still advanced
+  `meta.ProvisionedKobo` to the new target — permanently understating the
+  real reserve on the books relative to what the metadata claimed. Fixed
+  by keying idempotency off the target amount instead of the date (safe
+  because this slice's reserve is monotonically non-decreasing by
+  design), caught only by watching the actual posted entries during live
+  verification, not by the idempotency key's own logic looking wrong on
+  a read.
+- **Not covered by Phase 3**: credit bureau reporting (CRC Credit Bureau,
+  FirstCentral) — a real commercial/certification relationship with an
+  external party this platform doesn't have yet, deliberately deferred to
+  its own slice rather than folded in alongside the two mechanics above.
+  No code exists for it anywhere in the platform yet.
 - **No staff-facing web UI** — backend/API only, matching how the
   gateway's own build was API-first with its developer portal as a later,
   separate slice.
@@ -316,7 +356,14 @@ src/services/
                                    breaker (low-volume, human-triggered, not a proxy absorbing
                                    arbitrary API load). Called both by approvalService.js (after
                                    approval) and directly by routes/accounts.js and routes/loans.js
-                                   (account-open and loan origination aren't maker-checker actions)
+                                   (account-open and loan origination aren't maker-checker actions),
+                                   and by delinquencyRunner.js (LOAN_LIST_ACTIVE/
+                                   LOAN_DELINQUENCY_FLAG, added Phase 3 slice 2)
+  delinquencyRunner.js            process-internal periodic job (setInterval, same shape as
+                                   services/payments' reconciliationRunner.js) — Phase 3 slice 2.
+                                   For every tenant this service holds both a Ledger and a
+                                   Compliance credential for, lists overdue ACTIVE loans and
+                                   forwards daysPastDue/bucket to Compliance's case-tracking
 src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
 src/routes/
   auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm

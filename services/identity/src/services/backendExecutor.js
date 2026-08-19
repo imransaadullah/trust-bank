@@ -100,6 +100,19 @@ const ACTIONS = {
     method: 'POST',
     path: (tenantId) => `/v1/tenants/${tenantId}/compliance/loan-eligibility-policy`,
   },
+  // Both called directly by delinquencyRunner.js, not maker-checker —
+  // mechanical: a scheduled read, and a caller-fed fact the Ledger already
+  // computed, same tier as LOAN_ELIGIBILITY_CHECK/LEDGER_ACCOUNT_OPEN.
+  LOAN_LIST_ACTIVE: {
+    service: 'ledger',
+    method: 'GET',
+    path: () => '/v1/loans',
+  },
+  LOAN_DELINQUENCY_FLAG: {
+    service: 'compliance',
+    method: 'POST',
+    path: (tenantId) => `/v1/tenants/${tenantId}/compliance/loan-delinquency-flag`,
+  },
 };
 
 /**

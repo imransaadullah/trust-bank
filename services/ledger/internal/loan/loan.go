@@ -55,6 +55,40 @@ type LoanMetadata struct {
 	OriginatedAt  time.Time  `json:"originatedAt"`
 	DisbursedAt   *time.Time `json:"disbursedAt,omitempty"`
 	MaturityDate  *time.Time `json:"maturityDate,omitempty"`
+	// ProvisionedKobo is the running total already reserved against this
+	// loan by internal/accrual's provisioning pass — only ever increases
+	// as delinquency worsens in this slice. Releasing the reserve when a
+	// loan cures or is repaid in full is a named follow-up, not built here.
+	ProvisionedKobo int64 `json:"provisionedKobo,omitempty"`
+}
+
+// DaysPastDue is 0 for a loan that hasn't been disbursed, hasn't reached
+// its MaturityDate yet, or has (rounds down, so the day a loan matures
+// counts as 0, not 1). Pure function of already-stored data — no new
+// tracking needed to detect lateness.
+func DaysPastDue(meta LoanMetadata, asOf time.Time) int {
+	if meta.MaturityDate == nil || !asOf.After(*meta.MaturityDate) {
+		return 0
+	}
+	return int(asOf.Sub(*meta.MaturityDate).Hours() / 24)
+}
+
+// Bucket classifies days-past-due into the fixed provisioning/collections
+// tiers internal/accrual's provisioning pass and services/identity's
+// delinquency runner both key off of.
+func Bucket(daysPastDue int) string {
+	switch {
+	case daysPastDue <= 0:
+		return "current"
+	case daysPastDue <= 30:
+		return "1-30"
+	case daysPastDue <= 60:
+		return "31-60"
+	case daysPastDue <= 90:
+		return "61-90"
+	default:
+		return "90+"
+	}
 }
 
 type OriginateInput struct {
@@ -253,6 +287,24 @@ func ListByCustomer(ctx context.Context, pool *pgxpool.Pool, tenantID, externalC
 	var accounts []domain.LedgerAccount
 	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {
 		list, err := account.ListByExternalCustomerIDAndProduct(ctx, tx, tenantID, externalCustomerID, LoanProductType)
+		if err != nil {
+			return err
+		}
+		accounts = list
+		return nil
+	})
+	return accounts, err
+}
+
+// ListActive returns every ACTIVE loan across the whole tenant, not just
+// one customer's — account.ListByProductType already filters to ACTIVE
+// in SQL, so this is a thin, tenant-wide sibling to ListByCustomer. Used
+// by the delinquency httpapi route (services/identity's runner has no
+// reason to know every customer ID up front).
+func ListActive(ctx context.Context, pool *pgxpool.Pool, tenantID string) ([]domain.LedgerAccount, error) {
+	var accounts []domain.LedgerAccount
+	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		list, err := account.ListByProductType(ctx, tx, tenantID, LoanProductType)
 		if err != nil {
 			return err
 		}

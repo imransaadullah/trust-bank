@@ -2,8 +2,12 @@ package httpapi
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
+	"time"
 
+	"trustbank/ledger/internal/domain"
+	"trustbank/ledger/internal/ledger"
 	"trustbank/ledger/internal/loan"
 )
 
@@ -127,9 +131,57 @@ func (s *Server) handleListLoans(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	list := make([]map[string]any, len(accounts))
-	for i, acc := range accounts {
-		list[i] = accountResponse(&acc)
+	respondJSON(w, http.StatusOK, map[string]any{"loans": s.loanResponses(r, tenantID, accounts)})
+}
+
+// handleListActiveLoans is the tenant-wide sibling to handleListLoans —
+// not scoped to one customer. services/identity's delinquency runner
+// doesn't know every customer ID up front, so it needs "every ACTIVE loan
+// this tenant has" in one call.
+func (s *Server) handleListActiveLoans(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := tenantFromContext(r.Context())
+
+	accounts, err := loan.ListActive(r.Context(), s.pool, tenantID)
+	if err != nil {
+		respondWalletError(w, err)
+		return
 	}
-	respondJSON(w, http.StatusOK, map[string]any{"loans": list})
+
+	respondJSON(w, http.StatusOK, map[string]any{"loans": s.loanResponses(r, tenantID, accounts)})
+}
+
+// loanResponse is richer than the generic accountResponse: unmarshals
+// LoanMetadata and adds the current balance plus a computed
+// daysPastDue/bucket — the specific fields the delinquency runner and any
+// loan-detail UI need that a wallet/savings account response has no use for.
+func (s *Server) loanResponse(r *http.Request, tenantID string, acc *domain.LedgerAccount) map[string]any {
+	base := accountResponse(acc)
+
+	var meta loan.LoanMetadata
+	if err := json.Unmarshal(acc.Metadata, &meta); err != nil {
+		log.Printf("httpapi: unmarshal loan metadata for %s: %v", acc.ID, err)
+		return base
+	}
+	base["principalKobo"] = meta.PrincipalKobo
+	base["annualRateBps"] = meta.AnnualRateBps
+	base["maturityDate"] = meta.MaturityDate
+
+	bal, err := ledger.GetBalance(r.Context(), s.pool, tenantID, acc.ID)
+	if err != nil {
+		log.Printf("httpapi: get balance for loan %s: %v", acc.ID, err)
+		return base
+	}
+	base["balance"] = bal.Amount
+	daysPastDue := loan.DaysPastDue(meta, time.Now().UTC())
+	base["daysPastDue"] = daysPastDue
+	base["bucket"] = loan.Bucket(daysPastDue)
+	return base
+}
+
+func (s *Server) loanResponses(r *http.Request, tenantID string, accounts []domain.LedgerAccount) []map[string]any {
+	list := make([]map[string]any, len(accounts))
+	for i := range accounts {
+		list[i] = s.loanResponse(r, tenantID, &accounts[i])
+	}
+	return list
 }

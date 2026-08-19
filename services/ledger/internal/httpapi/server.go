@@ -48,6 +48,7 @@ func NewServer(pool *pgxpool.Pool) http.Handler {
 	mux.Handle("POST /v1/loans/{id}/disburse", operate(s.handleDisburseLoan))
 	mux.Handle("POST /v1/loans/{id}/repay", operate(s.handleRepayLoan))
 	mux.Handle("GET /v1/customers/{externalCustomerId}/loans", operate(s.handleListLoans))
+	mux.Handle("GET /v1/loans", operate(s.handleListActiveLoans))
 
 	return mux
 }

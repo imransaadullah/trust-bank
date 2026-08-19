@@ -86,6 +86,10 @@ func SeedDefault(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]*E
 		{"1000", "Assets", "", domain.Asset, domain.Debit, false},
 		{"1100", "Cash & Bank", "1000", domain.Asset, domain.Debit, true},
 		{"1200", "Loans Receivable", "1000", domain.Asset, domain.Debit, false},
+		// Contra-asset: Asset-typed but Credit-normal, offsetting Loans
+		// Receivable's reported balance. Type and NormalBalance are already
+		// independent fields — no schema change needed for this shape.
+		{"1250", "Loan Loss Reserve", "1000", domain.Asset, domain.Credit, false},
 
 		{"2000", "Liabilities", "", domain.Liability, domain.Credit, false},
 		{"2100", "Customer Deposits", "2000", domain.Liability, domain.Credit, false},
@@ -100,6 +104,7 @@ func SeedDefault(ctx context.Context, tx pgx.Tx, tenantID string) (map[string]*E
 
 		{"5000", "Expense", "", domain.Expense, domain.Debit, false},
 		{"5100", "Interest Expense", "5000", domain.Expense, domain.Debit, true},
+		{"5200", "Loan Loss Provision Expense", "5000", domain.Expense, domain.Debit, true},
 	}
 
 	for _, s := range steps {

@@ -1,5 +1,6 @@
 const express = require('express');
 const decisionService = require('../services/decisionService');
+const screeningService = require('../services/screeningService');
 const { requireApiKey } = require('../middleware/auth');
 
 const router = express.Router();
@@ -47,6 +48,26 @@ router.post('/:tenantId/compliance/loan-eligibility-check', requireApiKey('opera
       requestedAmountKobo, requestedTenorDays, hasActiveLoan: !!hasActiveLoan,
     });
     res.json({ success: true, data: decision });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Mechanical, caller-fed — the Ledger owns loan state and already computed
+// daysPastDue/bucket (services/identity's delinquencyRunner just forwards
+// them); this doesn't decide anything, it opens/updates the case a staff
+// member reviews through the existing COMPLIANCE_CASE_REVIEW flow.
+router.post('/:tenantId/compliance/loan-delinquency-flag', requireApiKey('operate'), async (req, res, next) => {
+  try {
+    const { userId, loanAccountId, daysPastDue, bucket, principalOutstandingKobo } = req.body;
+    if (!userId || !loanAccountId || daysPastDue == null || !bucket) {
+      return res.status(400).json({ success: false, error: 'userId, loanAccountId, daysPastDue, and bucket are required' });
+    }
+    const result = await screeningService.flagLoanDelinquency({
+      tenantId: req.params.tenantId, userId, loanAccountId,
+      daysPastDue, bucket, principalOutstandingKobo,
+    });
+    res.json({ success: true, data: result });
   } catch (err) {
     next(err);
   }

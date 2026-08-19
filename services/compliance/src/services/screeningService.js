@@ -149,6 +149,40 @@ async function screenSanctions({ tenantId, userId, fullName }) {
   return { hit, matchedEntries };
 }
 
+const DELINQUENCY_SEVERITY = { '1-30': 'low', '31-60': 'medium', '61-90': 'high', '90+': 'blocking' };
+
+// Unlike screenTransaction/screenSanctions (one real event -> one case),
+// this is re-evaluated on every delinquencyRunner tick for the same loan —
+// so it updates the existing open case in place instead of creating a
+// duplicate every tick. A deliberate deviation from the create-only
+// pattern above, not an oversight.
+async function flagLoanDelinquency({ tenantId, userId, loanAccountId, daysPastDue, bucket, principalOutstandingKobo }) {
+  const existing = await prisma.complianceCase.findFirst({
+    where: { tenantId, caseType: 'loan_delinquency', status: 'open', context: { path: ['loanAccountId'], equals: loanAccountId } },
+  });
+
+  if (daysPastDue <= 0) {
+    return { flagged: false, caseId: existing ? existing.id : null };
+  }
+
+  const severity = DELINQUENCY_SEVERITY[bucket] || 'low';
+  const context = { loanAccountId, daysPastDue, bucket, principalOutstandingKobo };
+  const matchedRules = [{ rule: 'days_past_due', daysPastDue, bucket }];
+
+  if (existing) {
+    const updated = await prisma.complianceCase.update({
+      where: { id: existing.id },
+      data: { severity, context, matchedRules },
+    });
+    return { flagged: true, caseId: updated.id };
+  }
+
+  const created = await prisma.complianceCase.create({
+    data: { tenantId, userId, caseType: 'loan_delinquency', severity, matchedRules, context },
+  });
+  return { flagged: true, caseId: created.id };
+}
+
 async function listCases({ tenantId, status, caseType }) {
   return prisma.complianceCase.findMany({
     where: { tenantId, ...(status ? { status } : {}), ...(caseType ? { caseType } : {}) },
@@ -165,4 +199,4 @@ async function reviewCase({ tenantId, caseId, status, reviewedBy, reviewNotes })
   });
 }
 
-module.exports = { screenTransaction, screenSanctions, listCases, reviewCase };
+module.exports = { screenTransaction, screenSanctions, flagLoanDelinquency, listCases, reviewCase };

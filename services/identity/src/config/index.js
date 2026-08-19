@@ -8,6 +8,19 @@ function required(name) {
   return value;
 }
 
+// Same overflow this codebase has already been bitten by once —
+// services/compliance/src/config/index.js's clampPollHours, caught live
+// when an intentionally-huge test value turned a runner into a tight
+// loop (setInterval/setTimeout silently overflow past ~24.8 days, a
+// 32-bit signed ms count internally). 30,000 minutes = 500 hours, the
+// same real margin compliance's own clamp uses.
+const MAX_SAFE_POLL_MINUTES = 30_000;
+function clampPollMinutes(value, fallback) {
+  const parsed = parseInt(value, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
+  return Math.min(parsed, MAX_SAFE_POLL_MINUTES);
+}
+
 module.exports = {
   env: process.env.NODE_ENV || 'development',
   port: parseInt(process.env.PORT || '8085', 10),
@@ -34,4 +47,9 @@ module.exports = {
   // credential (src/services/tenantBackendCredentialService.js).
   ledger: { baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080' },
   compliance: { baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083' },
+  // src/services/delinquencyRunner.js — a process-internal periodic job,
+  // same shape as services/payments' reconciliationRunner.js.
+  delinquency: {
+    pollIntervalMinutes: clampPollMinutes(process.env.DELINQUENCY_POLL_INTERVAL_MINUTES, 60),
+  },
 };
