@@ -205,6 +205,43 @@ func RecordWithdrawal(ctx context.Context, pool *pgxpool.Pool, in RecordWithdraw
 	})
 }
 
+type RecordCardSettlementInput struct {
+	TenantID           string
+	ExternalCustomerID string
+	Amount             int64
+	Reference          string
+	IdempotencyKey     string
+	Description        string
+}
+
+// RecordCardSettlement is structurally identical to RecordWithdrawal —
+// debit the customer, credit float — but gets its own entryType
+// ("card_settlement" vs "withdrawal") for real accounting distinction,
+// same reasoning loan_disbursement got its own type instead of reusing a
+// generic transfer. services/cards calls this after its own authorize
+// step approves a transaction; the Ledger has no "card" concept of its
+// own, this is just another money-movement primitive against the
+// customer's existing wallet.
+func RecordCardSettlement(ctx context.Context, pool *pgxpool.Pool, in RecordCardSettlementInput) (*domain.JournalEntry, error) {
+	customerID, err := resolveAccountID(ctx, pool, in.TenantID, in.ExternalCustomerID)
+	if err != nil {
+		return nil, err
+	}
+	floatID, err := resolveAccountByNumber(ctx, pool, in.TenantID, tenant.FloatAccountNumber)
+	if err != nil {
+		return nil, err
+	}
+
+	return ledger.PostJournalEntry(ctx, pool, ledger.PostInput{
+		TenantID: in.TenantID, Reference: in.Reference, IdempotencyKey: in.IdempotencyKey,
+		EntryType: "card_settlement", Description: in.Description,
+		Lines: []ledger.LineInput{
+			{LedgerAccountID: customerID, Direction: domain.Debit, Amount: in.Amount},
+			{LedgerAccountID: floatID, Direction: domain.Credit, Amount: in.Amount},
+		},
+	})
+}
+
 func resolveAccountID(ctx context.Context, pool *pgxpool.Pool, tenantID, externalCustomerID string) (string, error) {
 	var id string
 	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {

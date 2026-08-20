@@ -1,0 +1,102 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// CARD
+// The card's own product state — status, limits, and a tokenized
+// reference (providerRef) to whatever a real card-issuing-as-a-service
+// provider would return. No PAN, no CVV, no PIN — not here, not
+// anywhere in this service. See src/providers/cardIssuingProvider.js's
+// own comment for why: PAN data belongs in a PCI-DSS-scoped enclave a
+// certified third party owns, never this codebase.
+//
+// A card holds no balance of its own — every real money movement it
+// triggers is a normal Ledger journal entry against the customer's
+// existing wallet (src/services/ledgerClient.js), same as every other
+// domain service in this platform. dailySpendLimitKobo/singleTxnLimitKobo
+// are stamped from the Compliance eligibility decision at issuance time,
+// not re-read from the policy on every authorize call.
+// ============================================
+model Card {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  externalCustomerId  String   @map("external_customer_id")
+  status              String   @default("PENDING") // PENDING | ACTIVE | FROZEN | CLOSED
+  last4               String   @map("last4")
+  expiryMonth         Int      @map("expiry_month")
+  expiryYear          Int      @map("expiry_year")
+  providerRef         String   @map("provider_ref")
+  dailySpendLimitKobo Int      @map("daily_spend_limit_kobo")
+  singleTxnLimitKobo  Int      @map("single_txn_limit_kobo")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId, externalCustomerId])
+  @@map("cards")
+}
+
+// ============================================
+// CARD SETTLEMENT
+// A local record of every settled authorization — needed to enforce
+// dailySpendLimitKobo (summed here, not re-derived from the Ledger,
+// which has no notion of "today's card spend" of its own) and as this
+// service's own audit trail of what it told the Ledger to move.
+// ============================================
+model CardSettlement {
+  id             String   @id @default(uuid())
+  tenantId       String   @map("tenant_id")
+  cardId         String   @map("card_id")
+  amountKobo     Int      @map("amount_kobo")
+  reference      String   @map("reference")
+  idempotencyKey String   @unique @map("idempotency_key")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([cardId, createdAt])
+  @@map("card_settlements")
+}
+
+// ============================================
+// API CREDENTIAL
+// Same scoped-credential model every other service uses — see
+// SERVICE_CREDENTIAL_MODEL.md (repo root) and src/services/credentialService.js.
+// ============================================
+model ApiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  label       String
+  tokenPrefix String    @unique @map("token_prefix")
+  hashedToken String    @map("hashed_token")
+  scope       String // 'admin' | 'operate'
+  status      String    @default("active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("api_credentials")
+}
+
+// ============================================
+// TENANT LEDGER CREDENTIAL
+// The operate-scope Ledger credential this service uses to call the
+// Ledger on a given tenant's behalf directly (src/services/ledgerClient.js) —
+// authorize/settle are processor-driven in a real deployment, not routed
+// through trustpay-backend, so this service needs its own credential the
+// same way services/payments does (TenantLedgerCredential there).
+// ============================================
+model TenantLedgerCredential {
+  id             String   @id @default(uuid())
+  tenantId       String   @unique @map("tenant_id")
+  encryptedToken String   @map("encrypted_token")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("tenant_ledger_credentials")
+}

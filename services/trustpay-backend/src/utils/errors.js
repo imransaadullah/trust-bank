@@ -49,7 +49,15 @@ class InvalidProviderError extends TrustPayError {
   }
 }
 
+// Deliberately a generic 404, not 403 — doesn't confirm or deny that a
+// card with this id exists at all, just that it isn't one of yours.
+class CardNotFoundError extends TrustPayError {
+  constructor() {
+    super('No card found with that id', 'CARD_NOT_FOUND', 404);
+  }
+}
+
 module.exports = {
   TrustPayError, InvalidOtpError, KYCTierRequiredError, UserNotFoundError, ComplianceDeniedError,
-  ProviderNotImplementedError, InvalidProviderError,
+  ProviderNotImplementedError, InvalidProviderError, CardNotFoundError,
 };

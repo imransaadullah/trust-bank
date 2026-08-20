@@ -51,4 +51,8 @@ module.exports = {
     baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083',
     apiKey: required('COMPLIANCE_API_KEY'),
   },
+  cards: {
+    baseUrl: process.env.CARDS_SERVICE_URL || 'http://localhost:8086',
+    apiKey: required('CARDS_API_KEY'),
+  },
 };

@@ -110,6 +110,31 @@ model LoanEligibilityPolicy {
 }
 
 // ============================================
+// CARD ISSUANCE POLICY
+// Same versioned-policy shape as LoanEligibilityPolicy — a rule change is
+// a new row, never an update. dailySpendLimitKobo/singleTxnLimitKobo are
+// stamped onto the Card record at issuance time (services/cards), the
+// same way a loan's interestRateAnnualBps is fixed at origination from
+// the eligibility decision, not re-read from the policy on every use.
+// ============================================
+model CardIssuancePolicy {
+  id                  String   @id @default(uuid())
+  tenantId            String   @map("tenant_id")
+  jurisdiction        String   @default("NG")
+  minKycTier          Int      @map("min_kyc_tier")
+  maxCardsPerCustomer Int      @map("max_cards_per_customer")
+  dailySpendLimitKobo Int      @map("daily_spend_limit_kobo")
+  singleTxnLimitKobo  Int      @map("single_txn_limit_kobo")
+  version             Int
+  effectiveFrom       DateTime @map("effective_from")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  @@unique([tenantId, jurisdiction, version])
+  @@index([tenantId, jurisdiction, effectiveFrom])
+  @@map("card_issuance_policies")
+}
+
+// ============================================
 // SANCTIONS WATCHLIST ENTRY
 // Not tenant-scoped — a sanctioned name is sanctioned regardless of
 // which tenant's customer they are. Seed/test data only in this pass,

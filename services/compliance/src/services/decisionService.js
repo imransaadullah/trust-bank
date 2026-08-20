@@ -99,4 +99,34 @@ async function evaluateLoanEligibility({ tenantId, jurisdiction, kycTier, reques
   };
 }
 
-module.exports = { evaluateKYCTier, evaluateDevice, evaluateLoanEligibility };
+// Stateless and caller-fed, same posture as evaluateLoanEligibility —
+// Compliance doesn't own card state any more than it owns loan state,
+// services/cards does. existingCardCount comes from the caller
+// (trustpay-backend, via services/cards) the same way hasActiveLoan does.
+async function evaluateCardIssuanceEligibility({ tenantId, jurisdiction, kycTier, existingCardCount }) {
+  const policy = await policyService.getCurrentCardIssuancePolicy(tenantId, jurisdiction);
+
+  if (kycTier < policy.minKycTier) {
+    return {
+      allowed: false, reason: `Requires at least KYC tier ${policy.minKycTier}`,
+      dailySpendLimitKobo: policy.dailySpendLimitKobo, singleTxnLimitKobo: policy.singleTxnLimitKobo,
+      maxCardsPerCustomer: policy.maxCardsPerCustomer, policyVersion: policy.version,
+    };
+  }
+
+  if (existingCardCount >= policy.maxCardsPerCustomer) {
+    return {
+      allowed: false, reason: `Exceeds the maximum of ${policy.maxCardsPerCustomer} card(s) per customer`,
+      dailySpendLimitKobo: policy.dailySpendLimitKobo, singleTxnLimitKobo: policy.singleTxnLimitKobo,
+      maxCardsPerCustomer: policy.maxCardsPerCustomer, policyVersion: policy.version,
+    };
+  }
+
+  return {
+    allowed: true, dailySpendLimitKobo: policy.dailySpendLimitKobo,
+    singleTxnLimitKobo: policy.singleTxnLimitKobo, maxCardsPerCustomer: policy.maxCardsPerCustomer,
+    policyVersion: policy.version,
+  };
+}
+
+module.exports = { evaluateKYCTier, evaluateDevice, evaluateLoanEligibility, evaluateCardIssuanceEligibility };

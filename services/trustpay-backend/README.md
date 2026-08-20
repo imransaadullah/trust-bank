@@ -73,6 +73,17 @@ instances during development:**
   correctly `status: 'reversed'`. The existing withdrawal/P2P/savings
   flows were re-verified unchanged after `enforceCompliance` moved out
   of `wallet.js`.
+- Cards (`/cards`, Phase 4 slice 1) — issuance runs `complianceClient
+  .checkCardIssuance` (a new, dedicated eligibility check; not routed
+  through `enforceCompliance`, which is shaped for a transaction amount,
+  not a "who's allowed a card at all" policy question) before ever
+  calling `services/cards`. Freeze/unfreeze/close each verify the card
+  belongs to the calling user first (`ownCardOrThrow`, checked against
+  the user's own card list — `services/cards`' own routes don't enforce
+  this themselves, trusting the product backend the way every domain
+  service trusts its calling backend). See `services/cards`' own README
+  for what was verified live on that side (limits, live balance checks,
+  freeze/unfreeze/close, `maxCardsPerCustomer`).
 - Identity is behind a provider abstraction (`src/identity/`), the same
   pattern `PaymentsProvider`/`BillsProvider` already use for rails and
   billers: a contract (`identityProvider.js`), a real implementation
@@ -168,6 +179,15 @@ curl -X POST localhost:8082/bills/verify -H "Authorization: Bearer $TOKEN" \
 # requires kycTier >= 1, goes through enforceCompliance same as withdraw
 curl -X POST localhost:8082/bills/pay -H "Authorization: Bearer $TOKEN" \
   -d '{"billerCode":"biller-1","customerId":"08010000000","amount":50000,"customerName":"Ada Lovelace"}'
+
+# requires kycTier >= 1 (a new CardIssuancePolicy check, not enforceCompliance —
+# see the "what's real" note above on why). Limits on the response come from
+# that policy, not the caller.
+curl -X POST localhost:8082/cards -H "Authorization: Bearer $TOKEN"
+curl localhost:8082/cards -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8082/cards/$CARD_ID/freeze -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8082/cards/$CARD_ID/unfreeze -H "Authorization: Bearer $TOKEN"
+curl -X POST localhost:8082/cards/$CARD_ID/close -H "Authorization: Bearer $TOKEN"
 ```
 
 ## Layout
@@ -184,9 +204,10 @@ src/identity/          identityProvider.js (contract), authCoreProvider.js
                        (interface-only stub), registry.js (name -> instance,
                        a single deploy-time IDENTITY_PROVIDER choice)
 src/services/          ledgerClient, paymentsClient, complianceClient,
-                       complianceEnforcement (enforceCompliance, shared by
-                       wallet.js and bills.js)
-src/routes/            auth, kyc, wallet, savings, bills
+                       cardsClient (Phase 4 slice 1), complianceEnforcement
+                       (enforceCompliance, shared by wallet.js and bills.js —
+                       cards.js does NOT use this, see its own note above)
+src/routes/            auth, kyc, wallet, savings, bills, cards
 src/middleware/auth.js  verifies this backend's own JWT (not AuthCore's, not
                        the Ledger's/Payments'/Compliance's operate credentials)
                        and attaches the device claim minted at login

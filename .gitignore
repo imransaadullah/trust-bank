@@ -10,4 +10,6 @@ services/gateway/node_modules/
 services/gateway/.env
 services/identity/node_modules/
 services/identity/.env
+services/cards/node_modules/
+services/cards/.env
 *.log

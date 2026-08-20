@@ -52,6 +52,7 @@ LEDGER_URL="${LEDGER_SERVICE_URL:-http://127.0.0.1:8080}"
 PAYMENTS_URL="${PAYMENTS_SERVICE_URL:-http://127.0.0.1:8081}"
 COMPLIANCE_URL="${COMPLIANCE_SERVICE_URL:-http://127.0.0.1:8083}"
 GATEWAY_URL="${GATEWAY_SERVICE_URL:-http://127.0.0.1:8084}"
+CARDS_URL="${CARDS_SERVICE_URL:-http://127.0.0.1:8086}"
 
 SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV="" OPS_ADMIN_EMAIL=""
 
@@ -162,6 +163,21 @@ bootstrap_ledger_credentials() {
     token2="$(extract_token "$out2" lgr_live)"
     [ -n "$token2" ] || die "could not parse Ledger operate token for Payments"
     printf '%s' "$token2" > "$TENANT_DIR/ledger_operate_payments.token"; chmod 600 "$TENANT_DIR/ledger_operate_payments.token"
+  fi
+
+  # A third, distinct Ledger operate credential for Cards' own
+  # authorize/settle calls (services/cards/src/services/ledgerClient.js) —
+  # same reasoning as Payments' own above: Cards calls the Ledger
+  # directly (authorize/settle are processor-driven, not routed through
+  # the product backend), so it needs its own credential, not a shared one.
+  if [ ! -f "$TENANT_DIR/ledger_operate_cards.token" ]; then
+    log "Bootstrapping Ledger operate credential for $SLUG's Cards service"
+    local out3 token3
+    out3="$(cd "$APP_ROOT/services/ledger" && MIGRATE_DATABASE_URL="$migrate_url" \
+      go run ./cmd/bootstrap-key --scope operate --tenant-id "$TENANT_ID" --label "$SLUG-cards")"
+    token3="$(extract_token "$out3" lgr_live)"
+    [ -n "$token3" ] || die "could not parse Ledger operate token for Cards"
+    printf '%s' "$token3" > "$TENANT_DIR/ledger_operate_cards.token"; chmod 600 "$TENANT_DIR/ledger_operate_cards.token"
   fi
 }
 
@@ -290,6 +306,20 @@ store_payments_ledger_credential() {
   touch "$TENANT_DIR/payments_ledger_credential_stored"
 }
 
+# Cards' own Ledger credential — same reasoning as Payments' own above.
+# Needs ledger_operate_cards.token (bootstrap_ledger_credentials) and
+# cards_admin.token (bootstrap_node_service_credentials cards).
+store_cards_ledger_credential() {
+  [ -f "$TENANT_DIR/cards_ledger_credential_stored" ] && return
+  log "Storing $SLUG's Ledger credential in Cards (per-tenant, not .env)"
+  local admin_token; admin_token="$(cat "$TENANT_DIR/cards_admin.token")"
+  curl -sf -X POST "$CARDS_URL/v1/tenants/$TENANT_ID/ledger-credential" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/ledger_operate_cards.token")" '{token:$t}')" >/dev/null \
+    || die "storing Cards' Ledger credential failed"
+  touch "$TENANT_DIR/cards_ledger_credential_stored"
+}
+
 issue_starter_sandbox_key() {
   [ -f "$TENANT_DIR/gateway_sandbox.token" ] && return
   log "Issuing a starter sandbox-tier API key for $SLUG"
@@ -336,10 +366,11 @@ publish_default_policy() {
 # 7. Hand the operate credentials to a product backend
 # ---------------------------------------------------------------------------
 write_env_snippet() {
-  local ledger_key payments_key compliance_key
+  local ledger_key payments_key compliance_key cards_key
   ledger_key="$(cat "$TENANT_DIR/ledger_operate.token")"
   payments_key="$(cat "$TENANT_DIR/payments_operate.token")"
   compliance_key="$(cat "$TENANT_DIR/compliance_operate.token")"
+  cards_key="$(cat "$TENANT_DIR/cards_operate.token")"
 
   if [ -n "$PRODUCT_BACKEND_ENV" ]; then
     [ -f "$PRODUCT_BACKEND_ENV" ] || die "$PRODUCT_BACKEND_ENV does not exist"
@@ -348,6 +379,7 @@ write_env_snippet() {
     env_file_set LEDGER_API_KEY "$ledger_key" "$PRODUCT_BACKEND_ENV"
     env_file_set PAYMENTS_API_KEY "$payments_key" "$PRODUCT_BACKEND_ENV"
     env_file_set COMPLIANCE_API_KEY "$compliance_key" "$PRODUCT_BACKEND_ENV"
+    env_file_set CARDS_API_KEY "$cards_key" "$PRODUCT_BACKEND_ENV"
     log "Restart the product backend's service to pick these up: sudo systemctl restart <unit>"
   else
     cat <<EOF
@@ -359,6 +391,7 @@ TENANT_ID=$TENANT_ID
 LEDGER_API_KEY=$ledger_key
 PAYMENTS_API_KEY=$payments_key
 COMPLIANCE_API_KEY=$compliance_key
+CARDS_API_KEY=$cards_key
 EOF
   fi
 }
@@ -537,9 +570,11 @@ main() {
   bootstrap_ledger_credentials
   bootstrap_node_service_credentials payments pay_live trustbank_payments
   bootstrap_node_service_credentials compliance cmp_live trustbank_compliance
+  bootstrap_node_service_credentials cards crd_live trustbank_cards
   bootstrap_gateway_credentials
   store_gateway_backend_credentials
   store_payments_ledger_credential
+  store_cards_ledger_credential
   issue_starter_sandbox_key
   publish_default_policy
   write_env_snippet

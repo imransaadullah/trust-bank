@@ -52,4 +52,20 @@ router.post('/:tenantId/compliance/loan-eligibility-policy', requireApiKey('admi
   }
 });
 
+router.post('/:tenantId/compliance/card-issuance-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction, minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo, effectiveFrom } = req.body;
+    if (minKycTier == null || maxCardsPerCustomer == null || dailySpendLimitKobo == null || singleTxnLimitKobo == null) {
+      return res.status(400).json({ success: false, error: 'minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, and singleTxnLimitKobo are required' });
+    }
+    const policy = await policyService.publishCardIssuancePolicy({
+      tenantId: req.params.tenantId, jurisdiction: jurisdiction || 'NG',
+      minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo, effectiveFrom,
+    });
+    res.status(201).json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

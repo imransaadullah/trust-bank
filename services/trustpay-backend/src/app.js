@@ -8,6 +8,7 @@ const kycRoutes = require('./routes/kyc');
 const walletRoutes = require('./routes/wallet');
 const savingsRoutes = require('./routes/savings');
 const billsRoutes = require('./routes/bills');
+const cardsRoutes = require('./routes/cards');
 
 function createApp() {
   const app = express();
@@ -22,6 +23,7 @@ function createApp() {
   app.use('/wallet', walletRoutes);
   app.use('/savings', savingsRoutes);
   app.use('/bills', billsRoutes);
+  app.use('/cards', cardsRoutes);
 
   app.use(errorHandler);
 

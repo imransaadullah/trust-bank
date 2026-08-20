@@ -66,6 +66,25 @@ async function getCurrentLoanEligibilityPolicy(tenantId, jurisdiction, atDate = 
   return policy;
 }
 
+async function publishCardIssuancePolicy({ tenantId, jurisdiction, minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo, effectiveFrom }) {
+  const nextVersion = await nextVersionFor(prisma.cardIssuancePolicy, { tenantId, jurisdiction });
+  return prisma.cardIssuancePolicy.create({
+    data: {
+      tenantId, jurisdiction, minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo,
+      version: nextVersion, effectiveFrom: effectiveFrom ? new Date(effectiveFrom) : new Date(),
+    },
+  });
+}
+
+async function getCurrentCardIssuancePolicy(tenantId, jurisdiction, atDate = new Date()) {
+  const policy = await prisma.cardIssuancePolicy.findFirst({
+    where: { tenantId, jurisdiction, effectiveFrom: { lte: atDate } },
+    orderBy: { version: 'desc' },
+  });
+  if (!policy) throw new NoPolicyConfiguredError('card-issuance', tenantId);
+  return policy;
+}
+
 async function nextVersionFor(model, where) {
   const latest = await model.findFirst({ where, orderBy: { version: 'desc' } });
   return latest ? latest.version + 1 : 1;
@@ -74,4 +93,5 @@ async function nextVersionFor(model, where) {
 module.exports = {
   publishKYCPolicy, getCurrentKYCPolicy, publishDevicePolicy, getCurrentDevicePolicy,
   publishLoanEligibilityPolicy, getCurrentLoanEligibilityPolicy,
+  publishCardIssuancePolicy, getCurrentCardIssuancePolicy,
 };

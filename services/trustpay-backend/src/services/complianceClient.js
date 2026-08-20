@@ -37,6 +37,15 @@ class ComplianceClient {
     });
   }
 
+  // Card issuance eligibility — a policy question about who's allowed a
+  // card at all (min KYC tier, how many they can hold), not a
+  // transaction-amount check, so it doesn't go through checkKYCTier.
+  checkCardIssuance({ userId, kycTier, existingCardCount }) {
+    return this._request('POST', `/v1/tenants/${this.tenantId}/compliance/card-issuance-check`, {
+      userId, kycTier, existingCardCount,
+    });
+  }
+
   checkDevice({ userId, isNewDevice, deviceAgeHours, amount }) {
     return this._request('POST', `/v1/tenants/${this.tenantId}/compliance/device-check`, {
       userId, isNewDevice, deviceAgeHours, amount,

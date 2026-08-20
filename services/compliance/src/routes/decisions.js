@@ -53,6 +53,21 @@ router.post('/:tenantId/compliance/loan-eligibility-check', requireApiKey('opera
   }
 });
 
+router.post('/:tenantId/compliance/card-issuance-check', requireApiKey('operate'), async (req, res, next) => {
+  try {
+    const { jurisdiction, userId, kycTier, existingCardCount } = req.body;
+    if (!userId || kycTier == null || existingCardCount == null) {
+      return res.status(400).json({ success: false, error: 'userId, kycTier, and existingCardCount are required' });
+    }
+    const decision = await decisionService.evaluateCardIssuanceEligibility({
+      tenantId: req.params.tenantId, jurisdiction: jurisdiction || 'NG', kycTier, existingCardCount,
+    });
+    res.json({ success: true, data: decision });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Mechanical, caller-fed — the Ledger owns loan state and already computed
 // daysPastDue/bucket (services/identity's delinquencyRunner just forwards
 // them); this doesn't decide anything, it opens/updates the case a staff

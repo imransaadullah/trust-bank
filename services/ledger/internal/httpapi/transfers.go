@@ -109,3 +109,40 @@ func (s *Server) handleRecordWithdrawal(w http.ResponseWriter, r *http.Request) 
 
 	respondJSON(w, http.StatusCreated, journalEntryResponse(entry))
 }
+
+type recordCardSettlementRequest struct {
+	ExternalCustomerID string `json:"externalCustomerId"`
+	Amount             int64  `json:"amount"`
+	Reference          string `json:"reference"`
+	IdempotencyKey     string `json:"idempotencyKey"`
+	Description        string `json:"description"`
+}
+
+// handleRecordCardSettlement is services/cards' own settlement call —
+// grouped with the other transfer primitives (deposit/withdrawal/p2p)
+// since the Ledger has no "card" concept of its own, just another
+// money-movement primitive against an existing wallet.
+func (s *Server) handleRecordCardSettlement(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := tenantFromContext(r.Context())
+
+	var req recordCardSettlementRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		respondError(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if req.ExternalCustomerID == "" || req.Reference == "" || req.IdempotencyKey == "" {
+		respondError(w, http.StatusBadRequest, "externalCustomerId, reference, and idempotencyKey are required")
+		return
+	}
+
+	entry, err := wallet.RecordCardSettlement(r.Context(), s.pool, wallet.RecordCardSettlementInput{
+		TenantID: tenantID, ExternalCustomerID: req.ExternalCustomerID, Amount: req.Amount,
+		Reference: req.Reference, IdempotencyKey: req.IdempotencyKey, Description: req.Description,
+	})
+	if err != nil {
+		respondWalletError(w, err)
+		return
+	}
+
+	respondJSON(w, http.StatusCreated, journalEntryResponse(entry))
+}
