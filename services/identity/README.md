@@ -255,10 +255,45 @@ through the actual `deploy/provision-tenant.sh` (including its new
 - **No staff-facing web UI** — backend/API only, matching how the
   gateway's own build was API-first with its developer portal as a later,
   separate slice.
-- **No password reset / change-password flow** — a staff member keeps
-  whatever password `bootstrapStaffUser.js` generated (or whatever an
-  `ops_admin`-only staff-management route sets, once one exists) until
-  that's built.
+- **Password reset, change-password, and admin-initiated reset** (Phase 6)
+  — three related flows, not one. Self-service forgot-password
+  (`POST /v1/password-reset/request` + `/confirm`) emails a raw token via
+  a new `EmailProvider` contract (mirrors `PaymentsProvider`'s own
+  swappable-provider pattern) — the first feature anywhere in this
+  platform that reaches a human outside an authenticated session, and so
+  the first that needs email at all. `noopEmailProvider.js` logs the
+  token instead of sending (what this environment's own verification runs
+  against); `smtpEmailProvider.js` is a real `nodemailer` client that
+  works with any SMTP-compatible provider (AWS SES, SendGrid, Mailgun,
+  Postmark, a real Google Workspace account) the moment real credentials
+  exist — unlike Cards/credit-bureau's stubs, this one didn't need a
+  commercial relationship to build for real. The email carries a raw
+  token, not a clickable link — there's no staff web page to land on yet,
+  so the recipient submits it straight to the confirm API, same as
+  everything else in this service being API-first. `PasswordResetToken`
+  is a new shown-once/hashed/prefix-indexed model — deliberately not
+  reusing `mfaChallengeService.js`'s stateless-token pattern, since a
+  reset token needs real single-use revocation and can sit in an inbox
+  for the full expiry window, unlike an MFA challenge consumed within one
+  continuous login flow. `POST /v1/change-password` (logged in, no email
+  round-trip) revokes every *other* session for that staff member while
+  keeping the one making the request alive; a reset or the new
+  `POST /v1/staff/{id}/reset-password` (`ops_admin`-only, for a staff
+  member who's lost both password and email access — same high-entropy
+  temp-password generation as `scripts/bootstrapStaffUser.js`, just as a
+  route) revokes *every* session, since either implies the account may
+  have been compromised. `/password-reset/request` never reveals whether
+  an email exists — identical response either way. Verified live: a real
+  token logged by the noop provider, confirmed with a new password,
+  old password rejected and old session revoked; the same token rejected
+  on reuse, and again when expired; a non-existent email produced the
+  exact same response as a real one; change-password kept the calling
+  session alive while revoking a second, different session for the same
+  user; the admin route issued a working temp password and revoked prior
+  sessions. **Named limitation**: no rate limiting on
+  `/password-reset/request` — identity has no existing rate-limit
+  infrastructure (unlike the Gateway's own Postgres-backed
+  `rateLimitService.js`), and building one was out of scope for this item.
 - **No jest test suite yet** — this pass's verification was entirely live
   integration testing, not unit tests.
 
@@ -301,8 +336,28 @@ curl -X POST localhost:8085/v1/mfa/enroll/confirm \
 # straight to a code instead of enrolling:
 curl -X POST localhost:8085/v1/login/mfa -d '{"mfaChallengeToken":"...","code":"123456"}'
 
+# Forgot password — no auth on either route. request() always responds
+# the same way regardless of whether the email exists. The email (noop:
+# logged; smtp: a real send) carries a raw token, not a link — there's
+# no page to land on yet, submit it straight here.
+curl -X POST localhost:8085/v1/password-reset/request \
+  -d '{"tenantId":"'$TENANT_ID'","email":"ops@bank.example"}'
+curl -X POST localhost:8085/v1/password-reset/confirm \
+  -d '{"token":"prt_live_...","newPassword":"a-real-passphrase-12-chars-min"}'
+# -> revokes every session for that staff member
+
 # Everything below uses that session token.
 curl localhost:8085/v1/me -H "Authorization: Bearer $SESSION_TOKEN"
+
+# Change password while logged in — keeps this session alive, revokes
+# every other session for the same staff member.
+curl -X POST localhost:8085/v1/change-password -H "Authorization: Bearer $SESSION_TOKEN" \
+  -d '{"currentPassword":"...","newPassword":"a-real-passphrase-12-chars-min"}'
+
+# Admin-initiated reset — for a staff member who's lost both password and
+# email access. Returns a new temp password once, revokes every session.
+curl -X POST localhost:8085/v1/staff/$STAFF_USER_ID/reset-password \
+  -H "Authorization: Bearer $SESSION_TOKEN"   # ops_admin only
 
 curl -X POST localhost:8085/v1/branches -H "Authorization: Bearer $SESSION_TOKEN" \
   -d '{"code":"LAG-01","name":"Lagos Main Branch"}'   # ops_admin only
@@ -353,8 +408,11 @@ curl -X POST localhost:8085/v1/approvals/$APPROVAL_ID/retry-execution -H "Author
 ```
 prisma/                Branch (tenant org-unit), StaffUser (password + role + branch + MFA),
                        StaffSession (short-lived, sliding-expiry, shown-once/hashed),
-                       TenantBackendCredential (this service's own Ledger/Compliance operate
-                       credential per tenant), ApprovalRequest (maker-checker)
+                       PasswordResetToken (Phase 6, same shown-once/hashed shape as
+                       StaffSession — not mfaChallengeService.js's stateless pattern, a reset
+                       token needs real single-use revocation), TenantBackendCredential (this
+                       service's own Ledger/Compliance operate credential per tenant),
+                       ApprovalRequest (maker-checker)
 scripts/bootstrapStaffUser.js  creates the first staff user for a tenant — same
                                 chicken-and-egg fix as every other service's bootstrap script
 scripts/storeTenantBackendCredential.js  stores this tenant's Ledger/Compliance credential —
@@ -399,14 +457,32 @@ src/services/
                                    that exists; a real one is a new file behind the same
                                    providers/creditBureauProvider.js contract, nothing else
                                    changes)
+  passwordResetService.js         request()/confirm() — Phase 6. request() never reveals
+                                   whether an email exists; confirm() verifies the token,
+                                   updates the password (staffUserService.updatePassword,
+                                   shared with change-password), revokes every session
 src/providers/
   creditBureauProvider.js         abstract base — one method, submitLoanRecord(record) —
                                    mirrors services/payments' PaymentsProvider pattern
   noopCreditBureauProvider.js     logs what a real submission would send; returns
                                    {submitted:true, providerRef:null}
-src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate
+  emailProvider.js                abstract base — one method, sendPasswordResetEmail(...) —
+                                   Phase 6, the first feature here that reaches a human
+                                   outside an authenticated session
+  noopEmailProvider.js            logs the token instead of sending — this environment's own
+                                   verification runs against this
+  smtpEmailProvider.js            real nodemailer SMTP client — works with any SMTP-compatible
+                                   provider the moment real credentials exist, not a stub
+  registry.js                     EMAIL_PROVIDER env var -> instance, a single deploy-time
+                                   choice like trustpay-backend's own IDENTITY_PROVIDER, not a
+                                   per-tenant registry — email delivery isn't tenant-configurable
+src/middleware/requireStaffSession.js  mirrors requireApiKey's shape, adds an optional role gate;
+                                        attaches req.staffSessionId too (Phase 6) so
+                                        /change-password can revoke every *other* session
+                                        without logging out the request making the change
 src/routes/
-  auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm
+  auth.js    /v1/login, /v1/login/mfa, /v1/mfa/enroll, /v1/mfa/enroll/confirm,
+             /v1/change-password (Phase 6 — requires the current password, no email round-trip)
   me.js      /v1/me — the one demonstrable endpoint beyond auth plumbing
   branches.js /v1/branches — create (ops_admin) / list (any role)
   accounts.js /v1/accounts — staff-initiated open (teller/branch_manager/ops_admin), tags the
@@ -418,4 +494,8 @@ src/routes/
               checks existing-loan + Compliance eligibility before the Ledger ever
               writes a PENDING loan account; not maker-checker (disbursement is,
               via the generic /v1/approvals routes above, not a route here)
+  passwordReset.js  /v1/password-reset/request + /confirm — Phase 6, no auth on either
+                     (the request proves nothing; the token is the credential)
+  staff.js    /v1/staff/{id}/reset-password — Phase 6, ops_admin only, for a staff member
+              who's lost both password and email access
 ```

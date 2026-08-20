@@ -121,6 +121,18 @@ class ProviderNotImplementedError extends IdentityError {
   }
 }
 
+class PasswordResetTokenInvalidError extends IdentityError {
+  constructor() {
+    super('Password reset token is invalid, expired, or already used', 'PASSWORD_RESET_TOKEN_INVALID', 401);
+  }
+}
+
+class WeakPasswordError extends IdentityError {
+  constructor(minLength) {
+    super(`Password must be at least ${minLength} characters`, 'WEAK_PASSWORD', 400);
+  }
+}
+
 module.exports = {
   IdentityError,
   InvalidCredentialsError,
@@ -140,4 +152,6 @@ module.exports = {
   ApprovalNotFailedError,
   ExecutionFailedError,
   ProviderNotImplementedError,
+  PasswordResetTokenInvalidError,
+  WeakPasswordError,
 };

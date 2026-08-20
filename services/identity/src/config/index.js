@@ -60,4 +60,20 @@ module.exports = {
   creditBureau: {
     pollIntervalMinutes: clampPollMinutes(process.env.CREDIT_BUREAU_POLL_INTERVAL_MINUTES, 1440),
   },
+  // A single deploy-time choice ('noop' | 'smtp'), same pattern as
+  // trustpay-backend's own IDENTITY_PROVIDER — email delivery is a
+  // platform-operational concern here, not something a tenant
+  // configures the way a payment rail is. Used by
+  // src/services/passwordResetService.js.
+  email: {
+    provider: process.env.EMAIL_PROVIDER || 'noop',
+    resetTokenTtlMinutes: parseInt(process.env.PASSWORD_RESET_TOKEN_TTL_MINUTES || '30', 10),
+    smtp: {
+      host: process.env.SMTP_HOST,
+      port: parseInt(process.env.SMTP_PORT || '587', 10),
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+      from: process.env.SMTP_FROM || 'no-reply@trustbank.app',
+    },
+  },
 };

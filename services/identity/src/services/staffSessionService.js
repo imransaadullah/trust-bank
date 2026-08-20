@@ -62,4 +62,19 @@ async function revoke(sessionId) {
   });
 }
 
-module.exports = { issue, verify, revoke };
+/**
+ * Called after any password change — a reset or admin-initiated change
+ * kills every session; a self-service change-password kills every
+ * session except the one making the request (exceptSessionId).
+ */
+async function revokeAllForStaffUser(staffUserId, { exceptSessionId } = {}) {
+  await prisma.staffSession.updateMany({
+    where: {
+      staffUserId, status: 'active',
+      ...(exceptSessionId ? { id: { not: exceptSessionId } } : {}),
+    },
+    data: { status: 'revoked' },
+  });
+}
+
+module.exports = { issue, verify, revoke, revokeAllForStaffUser };

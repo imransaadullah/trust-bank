@@ -97,6 +97,12 @@ async function verifyMfaCode(staffUserId, code) {
   return staff;
 }
 
+/** Shared by both passwordResetService's confirm() and routes/auth.js's /change-password. */
+async function updatePassword({ staffUserId, newPassword }) {
+  const passwordHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+  return prisma.staffUser.update({ where: { id: staffUserId }, data: { passwordHash } });
+}
+
 async function get(staffUserId) {
   const staff = await prisma.staffUser.findUnique({ where: { id: staffUserId } });
   if (!staff) throw new StaffUserNotFoundError(staffUserId);
@@ -105,4 +111,5 @@ async function get(staffUserId) {
 
 module.exports = {
   ROLES, TENANT_WIDE_ROLES, create, verifyPassword, beginMfaEnrollment, confirmMfaEnrollment, verifyMfaCode, get,
+  updatePassword,
 };

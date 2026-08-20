@@ -15,7 +15,7 @@ function requireStaffSession({ roles } = {}) {
       }
       const token = auth.slice('Bearer '.length);
 
-      const { staff } = await staffSessionService.verify(token);
+      const { session, staff } = await staffSessionService.verify(token);
 
       if (roles && !roles.includes(staff.role)) {
         return res.status(403).json({ success: false, error: `This route requires role: ${roles.join(' or ')}` });
@@ -25,6 +25,9 @@ function requireStaffSession({ roles } = {}) {
         id: staff.id, tenantId: staff.tenantId, email: staff.email,
         role: staff.role, branchId: staff.branchId,
       };
+      // Needed by /v1/change-password to revoke every *other* session
+      // without logging out the request that's making the change.
+      req.staffSessionId = session.id;
       next();
     } catch (err) {
       next(err);

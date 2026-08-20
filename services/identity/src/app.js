@@ -9,6 +9,8 @@ const branchesRoutes = require('./routes/branches');
 const approvalsRoutes = require('./routes/approvals');
 const accountsRoutes = require('./routes/accounts');
 const loansRoutes = require('./routes/loans');
+const passwordResetRoutes = require('./routes/passwordReset');
+const staffRoutes = require('./routes/staff');
 
 function createApp() {
   const app = express();
@@ -24,6 +26,8 @@ function createApp() {
   app.use(approvalsRoutes);
   app.use(accountsRoutes);
   app.use(loansRoutes);
+  app.use(passwordResetRoutes);
+  app.use(staffRoutes);
 
   app.use(errorHandler);
 
