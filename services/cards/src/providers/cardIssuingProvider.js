@@ -22,6 +22,14 @@ const { ProviderNotImplementedError } = require('../utils/errors');
  *
  * @typedef {Object} ProviderResult
  * @property {boolean} success
+ *
+ * @typedef {Object} WebhookEvent
+ * @property {'authorization'|'settlement'} type
+ * @property {string} cardProviderRef the providerRef this event is about —
+ *   how a webhook resolves which local Card row it's for
+ * @property {number} amountKobo
+ * @property {string} [reference]
+ * @property {Object} raw
  */
 class CardIssuingProvider {
   constructor(name) {
@@ -46,6 +54,32 @@ class CardIssuingProvider {
   /** @returns {Promise<ProviderResult>} */
   async closeCard(_providerRef) {
     throw new ProviderNotImplementedError(this.name, 'closeCard');
+  }
+
+  /**
+   * Verify a webhook's signature over the raw request body. Takes the
+   * full headers object, not one guessed header name — different
+   * processors use different header names for their signature, and the
+   * provider is the only thing that should have to know which one. Must
+   * not throw — return false on failure.
+   */
+  verifyWebhookSignature(_rawBody, _headers) {
+    throw new ProviderNotImplementedError(this.name, 'verifyWebhookSignature');
+  }
+
+  /** Normalize a provider's webhook payload. @returns {WebhookEvent} */
+  parseWebhookEvent(_eventBody) {
+    throw new ProviderNotImplementedError(this.name, 'parseWebhookEvent');
+  }
+
+  /**
+   * The one genuinely provider-specific piece of an authorization
+   * webhook: every processor expects its own response body shape for an
+   * approve/decline, returned synchronously (a real processor is waiting
+   * on this call). @param {{approved: boolean, reason?: string}} _decision
+   */
+  formatAuthorizationResponse(_decision) {
+    throw new ProviderNotImplementedError(this.name, 'formatAuthorizationResponse');
   }
 }
 

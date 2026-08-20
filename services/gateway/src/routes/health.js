@@ -3,8 +3,8 @@
 // each backend's own /health directly (not through backendProxy's
 // circuit breakers — a readiness check should reflect real-time backend
 // state, not be affected by or affect breaker state) and only reports
-// ready if all three answer. This is the resilience signal a bank's own
-// ops team would actually look for.
+// ready if every backend answers. This is the resilience signal a bank's
+// own ops team would actually look for.
 const express = require('express');
 const axios = require('axios');
 const config = require('../config');
@@ -18,6 +18,7 @@ router.get('/ready', async (req, res) => {
     ledger: config.ledger.baseUrl,
     payments: config.payments.baseUrl,
     compliance: config.compliance.baseUrl,
+    cards: config.cards.baseUrl,
   };
 
   const checks = {};

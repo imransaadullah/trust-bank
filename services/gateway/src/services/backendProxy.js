@@ -1,15 +1,15 @@
-// Proxies a request to Ledger/Payments/Compliance as the calling
+// Proxies a request to Ledger/Payments/Compliance/Cards as the calling
 // tenant, through a per-backend circuit breaker so one backend's
-// trouble can't cascade into failing calls to the other two (or hang
-// every caller for the backend's own timeout on every single request).
+// trouble can't cascade into failing calls to the others (or hang every
+// caller for the backend's own timeout on every single request).
 //
-// The three backends don't share a calling convention — a real,
-// pre-existing wrinkle documented in trustpay-backend's own README
-// ("paymentsClient.js and complianceClient.js both unwrap
-// response.data.data... the Ledger (Go) does not"), plus the Ledger
-// authenticates via an X-Tenant-Id header where Payments/Compliance
-// take the tenant in the URL path. `BACKENDS` below encodes both
-// differences once, so route handlers never see them.
+// The backends don't share a calling convention — a real, pre-existing
+// wrinkle documented in trustpay-backend's own README ("paymentsClient.js
+// and complianceClient.js both unwrap response.data.data... the Ledger
+// (Go) does not"), plus the Ledger authenticates via an X-Tenant-Id
+// header where the Node services take the tenant in the URL path.
+// `BACKENDS` below encodes both differences once, so route handlers
+// never see them.
 const axios = require('axios');
 const CircuitBreaker = require('opossum');
 const config = require('../config');
@@ -21,6 +21,7 @@ const BACKENDS = {
   ledger: { baseUrl: config.ledger.baseUrl, tenantVia: 'header' },
   payments: { baseUrl: config.payments.baseUrl, tenantVia: 'path' },
   compliance: { baseUrl: config.compliance.baseUrl, tenantVia: 'path' },
+  cards: { baseUrl: config.cards.baseUrl, tenantVia: 'path' },
 };
 
 async function rawCall(service, { method, path, tenantId, data }) {
@@ -60,7 +61,7 @@ for (const service of Object.keys(BACKENDS)) {
 }
 
 /**
- * @param {'ledger'|'payments'|'compliance'} service
+ * @param {'ledger'|'payments'|'compliance'|'cards'} service
  * @param {{method: string, path: string, tenantId: string, data?: object}} opts
  */
 async function call(service, opts) {

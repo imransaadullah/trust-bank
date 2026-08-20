@@ -42,6 +42,31 @@ model Card {
 }
 
 // ============================================
+// TENANT CARD PROVIDER CONFIG
+// Which CardIssuingProvider this tenant is on, and that provider's own
+// credentials — mirrors services/payments' TenantProviderConfig exactly.
+// 'noop' is the only provider that exists (Phase 4 slice 1/2); adding a
+// real one (Sudo Africa or otherwise) is a new provider file plus one
+// registry.js entry, not a change here. tenantSlug routes an inbound
+// authorization webhook before there's anything to authenticate against
+// (the URL has no room for an authenticated tenant lookup) — same reason
+// Payments' own config has one.
+// ============================================
+model TenantCardProviderConfig {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique @map("tenant_id")
+  tenantSlug           String   @unique @map("tenant_slug")
+  provider             String // 'noop' today
+  status               String   @default("active") // 'active' | 'inactive'
+  encryptedCredentials String   @map("encrypted_credentials") // AES-256-GCM, base64: iv.authTag.ciphertext
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([provider])
+  @@map("tenant_card_provider_configs")
+}
+
+// ============================================
 // CARD SETTLEMENT
 // A local record of every settled authorization — needed to enforce
 // dailySpendLimitKobo (summed here, not re-derived from the Ledger,

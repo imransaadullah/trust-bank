@@ -251,9 +251,19 @@ bootstrap_gateway_credentials() {
     printf '%s' "$token" > "$TENANT_DIR/compliance_operate_gateway.token"; chmod 600 "$TENANT_DIR/compliance_operate_gateway.token"
   fi
 
+  if [ ! -f "$TENANT_DIR/cards_operate_gateway.token" ]; then
+    log "Bootstrapping Cards operate credential for $SLUG's gateway"
+    local out token
+    out="$(cd "$APP_ROOT/services/cards" && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_cards?schema=public" \
+      node scripts/bootstrapKey.js --tenant-id "$TENANT_ID" --scope operate --label "$SLUG-gateway")"
+    token="$(extract_token "$out" crd_live)"
+    [ -n "$token" ] || die "could not parse Cards operate token for gateway"
+    printf '%s' "$token" > "$TENANT_DIR/cards_operate_gateway.token"; chmod 600 "$TENANT_DIR/cards_operate_gateway.token"
+  fi
+
   # The gateway's own admin-tier key for this tenant — bootstrapped
   # directly, same chicken-and-egg fix as every other service's first
-  # credential. Used below to store the three tokens above, and to issue
+  # credential. Used below to store the four tokens above, and to issue
   # a starter sandbox key; cached for any later rerun.
   if [ ! -f "$TENANT_DIR/gateway_admin.token" ]; then
     log "Bootstrapping gateway admin key for $SLUG"
@@ -268,7 +278,7 @@ bootstrap_gateway_credentials() {
 
 store_gateway_backend_credentials() {
   [ -f "$TENANT_DIR/gateway_backend_credentials_stored" ] && return
-  log "Storing $SLUG's Ledger/Payments/Compliance credentials in the gateway"
+  log "Storing $SLUG's Ledger/Payments/Compliance/Cards credentials in the gateway"
   local admin_token; admin_token="$(cat "$TENANT_DIR/gateway_admin.token")"
 
   curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
@@ -285,6 +295,11 @@ store_gateway_backend_credentials() {
     -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
     -d "$(jq -n --arg t "$(cat "$TENANT_DIR/compliance_operate_gateway.token")" '{service:"compliance",token:$t}')" >/dev/null \
     || die "storing the gateway's Compliance credential failed"
+
+  curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/cards_operate_gateway.token")" '{service:"cards",token:$t}')" >/dev/null \
+    || die "storing the gateway's Cards credential failed"
 
   touch "$TENANT_DIR/gateway_backend_credentials_stored"
 }

@@ -4,12 +4,15 @@
 // called — same "Compliance is consulted before the domain service
 // writes, by the calling backend" rule every other domain in this
 // platform already holds. This service never calls Compliance itself.
+//
+// The card provider is resolved per call via
+// tenantCardProviderConfigService, not a module-level constant — a real
+// deployment can have different tenants on different providers, same
+// posture services/payments already holds for payment rails.
 const prisma = require('../db/prismaClient');
 const ledgerClient = require('./ledgerClient');
-const { NoopCardIssuingProvider } = require('../providers/noopCardIssuingProvider');
+const tenantCardProviderConfigService = require('./tenantCardProviderConfigService');
 const { CardNotFoundError, CardNotActiveError } = require('../utils/errors');
-
-const provider = new NoopCardIssuingProvider();
 
 async function getCardOrThrow(tenantId, cardId) {
   const card = await prisma.card.findFirst({ where: { id: cardId, tenantId } });
@@ -17,7 +20,15 @@ async function getCardOrThrow(tenantId, cardId) {
   return card;
 }
 
+/** Resolves the local Card a webhook's cardProviderRef is about. */
+async function getCardByProviderRef(tenantId, providerRef) {
+  const card = await prisma.card.findFirst({ where: { providerRef, tenantId } });
+  if (!card) throw new CardNotFoundError(providerRef);
+  return card;
+}
+
 async function issueCard({ tenantId, externalCustomerId, dailySpendLimitKobo, singleTxnLimitKobo }) {
+  const { provider } = await tenantCardProviderConfigService.getProviderForTenant(tenantId);
   const issued = await provider.issueCard({ externalCustomerId });
   return prisma.card.create({
     data: {
@@ -35,6 +46,7 @@ async function listCardsByCustomer({ tenantId, externalCustomerId }) {
 async function freezeCard({ tenantId, cardId }) {
   const card = await getCardOrThrow(tenantId, cardId);
   if (card.status === 'CLOSED') throw new CardNotActiveError(cardId, card.status);
+  const { provider } = await tenantCardProviderConfigService.getProviderForTenant(tenantId);
   await provider.freezeCard(card.providerRef);
   return prisma.card.update({ where: { id: card.id }, data: { status: 'FROZEN' } });
 }
@@ -42,6 +54,7 @@ async function freezeCard({ tenantId, cardId }) {
 async function unfreezeCard({ tenantId, cardId }) {
   const card = await getCardOrThrow(tenantId, cardId);
   if (card.status !== 'FROZEN') throw new CardNotActiveError(cardId, card.status);
+  const { provider } = await tenantCardProviderConfigService.getProviderForTenant(tenantId);
   await provider.unfreezeCard(card.providerRef);
   return prisma.card.update({ where: { id: card.id }, data: { status: 'ACTIVE' } });
 }
@@ -49,6 +62,7 @@ async function unfreezeCard({ tenantId, cardId }) {
 async function closeCard({ tenantId, cardId }) {
   const card = await getCardOrThrow(tenantId, cardId);
   if (card.status === 'CLOSED') throw new CardNotActiveError(cardId, card.status);
+  const { provider } = await tenantCardProviderConfigService.getProviderForTenant(tenantId);
   await provider.closeCard(card.providerRef);
   return prisma.card.update({ where: { id: card.id }, data: { status: 'CLOSED' } });
 }
@@ -66,7 +80,10 @@ async function sumSettledToday(cardId) {
 // A decision object, not an exception, for every business-rule reject —
 // same posture as services/compliance's decisionService (an
 // authorization decline is a normal, expected outcome, not an error).
-// Only a genuinely missing card throws.
+// Only a genuinely missing card throws. Doesn't touch the provider at
+// all — this is trust-bank's own limits/balance check, not a provider
+// call, which is why authorize/settle don't need the provider resolved
+// (only issue/freeze/unfreeze/close do).
 async function authorize({ tenantId, cardId, amountKobo }) {
   const card = await getCardOrThrow(tenantId, cardId);
 
@@ -120,4 +137,7 @@ async function settle({ tenantId, cardId, amountKobo, reference, idempotencyKey,
   return { settled: true, journalEntry: entry };
 }
 
-module.exports = { issueCard, listCardsByCustomer, freezeCard, unfreezeCard, closeCard, authorize, settle };
+module.exports = {
+  issueCard, listCardsByCustomer, freezeCard, unfreezeCard, closeCard, authorize, settle,
+  getCardByProviderRef,
+};

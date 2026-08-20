@@ -13,6 +13,24 @@ class ProviderNotImplementedError extends CardsError {
   }
 }
 
+class TenantNotConfiguredError extends CardsError {
+  constructor(tenantId) {
+    super(`No card provider configured for tenant ${tenantId}`, 'TENANT_NOT_CONFIGURED', 404);
+  }
+}
+
+class InvalidProviderError extends CardsError {
+  constructor(provider) {
+    super(`Unknown card provider: ${provider}`, 'INVALID_PROVIDER', 400);
+  }
+}
+
+class WebhookVerificationError extends CardsError {
+  constructor(message) {
+    super(message || 'Webhook signature verification failed', 'WEBHOOK_VERIFICATION_FAILED', 401);
+  }
+}
+
 class CredentialNotFoundError extends CardsError {
   constructor(credentialId) {
     super(`No credential found with id ${credentialId}`, 'CREDENTIAL_NOT_FOUND', 404);
@@ -50,6 +68,9 @@ class LimitExceededError extends CardsError {
 module.exports = {
   CardsError,
   ProviderNotImplementedError,
+  TenantNotConfiguredError,
+  InvalidProviderError,
+  WebhookVerificationError,
   CredentialNotFoundError,
   TenantLedgerCredentialNotFoundError,
   CardNotFoundError,

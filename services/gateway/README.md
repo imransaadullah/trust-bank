@@ -6,12 +6,13 @@ for TrustPay), which serves that tenant's *own* consumer app. This is
 Phase 2's first slice (`CORE_BANKING_PLATFORM_ARCHITECTURE.md` §13 —
 "public API, tiered keys, sandbox, developer portal"): a resilient,
 authenticated, rate-limited front door in front of Ledger/Payments/
-Compliance's existing APIs. No new business logic — proxying, tiered
-access, and resilience, built in from the start rather than retrofitted.
+Compliance's (and, since Phase 4 slice 2, Cards') existing APIs. No new
+business logic — proxying, tiered access, and resilience, built in from
+the start rather than retrofitted.
 
 Multi-tenant, unlike the product backend: one process serves every bank
 tenant on the platform, each with its own API keys and its own stored
-Ledger/Payments/Compliance credential (`TenantBackendCredential`,
+Ledger/Payments/Compliance/Cards credential (`TenantBackendCredential`,
 encrypted at rest — see `prisma/schema.prisma`'s comment on why this
 can't just be one shared `.env` credential the way trustpay-backend's
 own backend calls work).
@@ -118,6 +119,15 @@ the actual `deploy/provision-tenant.sh` (not by hand):
   verification, not by reading the code. Fixed by moving the init call
   into its own same-origin file (`public/init.js`), which needs no CSP
   relaxation at all — the more minimal fix over widening the CSP.
+- **Cards proxying** (Phase 4 slice 2) — a fourth backend added to
+  `backendProxy.js`'s `BACKENDS` map, `VALID_SERVICES`, and a new
+  `routes/cards.js` mirroring `routes/compliance.js`'s exact shape. No
+  new circuit-breaker code — the existing per-backend-breaker loop picks
+  up the new entry automatically. Verified live through a real
+  production-tier API key: issuance, list, freeze, and unfreeze all
+  proxied correctly to a real Cards service, and an existing
+  Ledger-proxied route (account open) was confirmed unaffected by the
+  change in the same run.
 
 **Explicit placeholders:**
 - **No jest test suite yet** — this pass's verification was entirely live
@@ -179,6 +189,15 @@ curl -X POST localhost:8084/v1/tenants/$TENANT_ID/transfers/p2p \
 curl -X POST localhost:8084/v1/tenants/$TENANT_ID/compliance/kyc-tier-check \
   -H "Authorization: Bearer $API_KEY" \
   -d '{"userId":"customer-1","tier":1,"amount":1000,"amountTransactedTodayKobo":0}'
+
+# Cards (Phase 4 slice 2) — the tenant needs a TenantCardProviderConfig set
+# on services/cards first (POST /v1/tenants/$TENANT_ID/cards-config there).
+curl -X POST localhost:8084/v1/tenants/$TENANT_ID/cards \
+  -H "Authorization: Bearer $API_KEY" \
+  -d '{"externalCustomerId":"customer-1","dailySpendLimitKobo":500000,"singleTxnLimitKobo":200000}'
+
+curl localhost:8084/v1/tenants/$TENANT_ID/customers/customer-1/cards \
+  -H "Authorization: Bearer $API_KEY"
 ```
 
 Amounts are kobo, matching the rest of the platform.
@@ -191,7 +210,7 @@ public/                 the developer portal — index.html + init.js (same-orig
                         served at GET /docs; GET /openapi.yaml serves the spec itself live
 prisma/                ApiKey (tiered, rate-limited), RateLimitCounter (Postgres-backed,
                        fixed 1-minute windows), TenantBackendCredential (encrypted
-                       per-tenant Ledger/Payments/Compliance credential), SandboxTenant
+                       per-tenant Ledger/Payments/Compliance/Cards credential), SandboxTenant
                        (real tenant -> its isolated sandbox twin)
 scripts/bootstrapKey.js  issues the first admin-tier key for a tenant
 src/crypto/tenantBackendCredentials.js  AES-256-GCM, same pattern as services/payments'
@@ -215,5 +234,9 @@ src/routes/
   accounts.js                          Ledger: accounts, transfers
   identity.js                          Payments: identity verification, payouts
   compliance.js                        Compliance: kyc-tier-check, device-check
+  cards.js                             Cards: issuance, list, freeze/unfreeze/close,
+                                        authorize, settle (Phase 4 slice 2) — the
+                                        automatic webhook-driven path lives on
+                                        services/cards directly, not proxied here
   health.js                            /health (liveness), /ready (readiness)
 ```

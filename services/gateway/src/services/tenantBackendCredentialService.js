@@ -7,7 +7,7 @@ const prisma = require('../db/prismaClient');
 const { encrypt, decrypt } = require('../crypto/tenantBackendCredentials');
 const { TenantBackendCredentialNotFoundError } = require('../utils/errors');
 
-const VALID_SERVICES = ['ledger', 'payments', 'compliance'];
+const VALID_SERVICES = ['ledger', 'payments', 'compliance', 'cards'];
 
 async function store({ tenantId, service, token }) {
   if (!VALID_SERVICES.includes(service)) {

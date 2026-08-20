@@ -7,12 +7,13 @@ info:
     distinct from a tenant's own product backend (e.g. trustpay-backend),
     which serves that tenant's *own* consumer app. This is what a bank's
     engineers integrate against directly: accounts, transfers, identity
-    verification, and compliance checks, proxied to Ledger/Payments/
-    Compliance with tiered API keys, per-key rate limiting, and per-backend
-    circuit breaking in front. A sandbox-tier key is genuinely isolated —
-    its own tenant in Ledger/Payments/Compliance, not just a lower rate
-    limit on the same production data (see the /sandbox admin route
-    below) — while every route below is called with the same URL
+    verification, compliance checks, and card issuance/lifecycle, proxied
+    to Ledger/Payments/Compliance/Cards with tiered API keys, per-key
+    rate limiting, and per-backend circuit breaking in front. A
+    sandbox-tier key is genuinely isolated — its own tenant in
+    Ledger/Payments/Compliance, not just a lower rate limit on the same
+    production data (see the /sandbox admin route below) — while every
+    route below is called with the same URL
     (/v1/tenants/{realTenantId}/...) regardless of which tier issued the
     key.
 
@@ -45,7 +46,7 @@ paths:
 
   /ready:
     get:
-      summary: Readiness — are Ledger, Payments, and Compliance all reachable
+      summary: Readiness — are Ledger, Payments, Compliance, and Cards all reachable
       description: >
         Pings each backend's own /health directly, not through the circuit
         breakers in front of the banking routes — this reflects real-time
@@ -53,7 +54,7 @@ paths:
       security: []
       responses:
         '200':
-          description: All three backends reachable
+          description: All four backends reachable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ReadyResponse' }
@@ -374,6 +375,136 @@ paths:
       responses:
         '200':
           description: "{ allowed, capAppliedKobo?, cooldownHours?, reason?, policyVersion }"
+
+  /v1/tenants/{tenantId}/cards:
+    post:
+      summary: Issue a card for a customer
+      description: >
+        The tenant needs a TenantCardProviderConfig set on services/cards
+        first (POST /v1/tenants/{tenantId}/cards-config there, not proxied
+        through this gateway — an admin-tier operation on Cards directly).
+        No real PAN is ever involved — providerRef is a tokenized
+        reference from the configured provider (a no-op stub today).
+      tags: [Cards]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [externalCustomerId, dailySpendLimitKobo, singleTxnLimitKobo]
+              properties:
+                externalCustomerId: { type: string, example: "customer-1" }
+                dailySpendLimitKobo: { type: integer, example: 500000 }
+                singleTxnLimitKobo: { type: integer, example: 200000 }
+      responses:
+        '201':
+          description: >
+            Example captured from a real run:
+            {"id":"63797ad8-...","tenantId":"fe92f919-...","externalCustomerId":"customer-1","status":"ACTIVE","last4":"0000","expiryMonth":1,"expiryYear":2029,"providerRef":"noop_card_d4a68075-...","dailySpendLimitKobo":500000,"singleTxnLimitKobo":200000}
+
+  /v1/tenants/{tenantId}/customers/{externalCustomerId}/cards:
+    get:
+      summary: List a customer's cards
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - name: externalCustomerId
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: "Array of Card objects, same shape as the issuance response."
+
+  /v1/tenants/{tenantId}/cards/{cardId}/freeze:
+    post:
+      summary: Freeze a card — authorize will reject regardless of limits/balance until unfrozen
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "The updated Card, status: FROZEN."
+
+  /v1/tenants/{tenantId}/cards/{cardId}/unfreeze:
+    post:
+      summary: Restore a frozen card to ACTIVE
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "The updated Card, status: ACTIVE."
+
+  /v1/tenants/{tenantId}/cards/{cardId}/close:
+    post:
+      summary: Permanently close a card
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: "The updated Card, status: CLOSED. Freeze/unfreeze/authorize all reject afterward."
+
+  /v1/tenants/{tenantId}/cards/{cardId}/authorize:
+    post:
+      summary: Manual/ops entry point for a card authorization check
+      description: >
+        The same logic a real provider's real-time authorization webhook
+        eventually drives automatically (see services/cards' own
+        POST /v1/webhooks/{tenantSlug}/{provider}, not proxied through
+        this gateway). Checks card status, per-transaction and daily
+        spend limits, and the linked wallet's live Ledger balance — never
+        a cached figure. A decision, not an error, for every business-rule
+        reject.
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountKobo]
+              properties:
+                amountKobo: { type: integer, example: 150000 }
+      responses:
+        '200':
+          description: "{ approved: true } or { approved: false, reason }"
+
+  /v1/tenants/{tenantId}/cards/{cardId}/settle:
+    post:
+      summary: Manual/ops entry point to settle an authorized amount
+      description: >
+        Posts a real card_settlement journal entry on the Ledger. Re-runs
+        authorize's own checks rather than trusting a prior authorize call
+        blindly — no hold/capture linkage exists yet (named, out of scope).
+      tags: [Cards]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: cardId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [amountKobo, reference, idempotencyKey]
+              properties:
+                amountKobo: { type: integer, example: 150000 }
+                reference: { type: string, example: "txn-1" }
+                idempotencyKey: { type: string, example: "txn-1" }
+                description: { type: string }
+      responses:
+        '200':
+          description: "{ settled: true, journalEntry } or { settled: false, reason }"
 
 components:
   securitySchemes:

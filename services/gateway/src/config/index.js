@@ -30,6 +30,7 @@ module.exports = {
   ledger: { baseUrl: process.env.LEDGER_SERVICE_URL || 'http://localhost:8080' },
   payments: { baseUrl: process.env.PAYMENTS_SERVICE_URL || 'http://localhost:8081' },
   compliance: { baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083' },
+  cards: { baseUrl: process.env.CARDS_SERVICE_URL || 'http://localhost:8086' },
   // Circuit breaker tuning — one breaker per backend service
   // (src/services/backendProxy.js), so Ledger trouble doesn't trip
   // Payments' or Compliance's.
