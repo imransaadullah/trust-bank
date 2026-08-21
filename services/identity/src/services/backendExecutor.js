@@ -114,6 +114,24 @@ const ACTIONS = {
     method: 'POST',
     path: (tenantId) => `/v1/tenants/${tenantId}/compliance/loan-delinquency-flag`,
   },
+  // Not maker-checker — a read, same tier as LEDGER_GET_ACCOUNT_BY_CUSTOMER/
+  // LOAN_LIST_BY_CUSTOMER. Called directly from src/routes/complianceCases.js
+  // so the staff console can list open cases before requesting a
+  // COMPLIANCE_CASE_REVIEW on one — Compliance's own case-list route is
+  // gated by a tenant API key, not a staff session, so staff can't call
+  // it directly; this proxies it the same way every other staff-facing
+  // read already goes through this module.
+  COMPLIANCE_CASE_LIST: {
+    service: 'compliance',
+    method: 'GET',
+    path: (tenantId, payload) => {
+      const params = new URLSearchParams();
+      if (payload?.status) params.set('status', payload.status);
+      if (payload?.caseType) params.set('caseType', payload.caseType);
+      const qs = params.toString();
+      return `/v1/tenants/${tenantId}/compliance/cases${qs ? `?${qs}` : ''}`;
+    },
+  },
 };
 
 /**

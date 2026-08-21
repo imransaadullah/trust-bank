@@ -178,6 +178,15 @@ setup_node_service() {
   (cd "$dir" && npm ci && npx prisma generate)
   (cd "$dir" && DATABASE_URL="$(grep '^DATABASE_URL=' "$env_file" | cut -d= -f2-)" npx prisma migrate deploy)
 
+  # Admin console (identity only) — a fully separate npm project, built
+  # to services/identity/public/ and served via express.static under
+  # /console (see src/app.js). Guarded by directory existence so this
+  # stays a no-op for every other caller of setup_node_service.
+  if [ -d "$dir/admin-console" ]; then
+    log "Building $name's admin console"
+    (cd "$dir/admin-console" && npm ci && npm run build)
+  fi
+
   if [ "$first_run" -eq 1 ]; then
     case "$name" in
       payments)
@@ -338,7 +347,11 @@ Next steps:
      branches; Phase 2.5) needs its first staff user bootstrapped
      separately: node scripts/bootstrapStaffUser.js --tenant-id <id>
      --email <email> --role ops_admin, run from services/identity. See
-     services/identity/README.md.
+     services/identity/README.md. Its admin console (Phase 6) was
+     already built by this script and is served at
+     https://<identity's Caddy domain>/console — see
+     deploy/Caddyfile.example and deploy/NETWORK_TOPOLOGY.md's
+     "Identity's public posture" section.
   3. Payments' TenantProviderConfig (Paystack/self-issued-NUBAN credentials)
      is set up per-tenant via its own API — see services/payments/README.md.
   4. Fill in deploy/backup.env (S3-compatible bucket + credentials, a

@@ -10,6 +10,12 @@ services/gateway/node_modules/
 services/gateway/.env
 services/identity/node_modules/
 services/identity/.env
+# Build artifact of admin-console/ — served via express.static in
+# src/app.js, distinct from services/gateway/public/, which is
+# checked-in hand-written HTML, not a build output.
+services/identity/public/
+services/identity/admin-console/node_modules/
+services/identity/admin-console/tsconfig.tsbuildinfo
 services/cards/node_modules/
 services/cards/.env
 services/checkout/node_modules/

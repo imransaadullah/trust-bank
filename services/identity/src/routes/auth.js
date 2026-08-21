@@ -100,4 +100,17 @@ router.post('/v1/change-password', requireStaffSession(), async (req, res, next)
   }
 });
 
+// Self-logout — until now, "logging out" only ever meant the client
+// discarding its own token; the server-side StaffSession row stayed
+// 'active' until its 30-minute idle timeout lapsed. Real revocation,
+// not just a client-side no-op.
+router.post('/v1/logout', requireStaffSession(), async (req, res, next) => {
+  try {
+    await staffSessionService.revoke(req.staffSessionId);
+    res.json({ success: true, data: { loggedOut: true } });
+  } catch (err) {
+    next(err);
+  }
+});
+
 module.exports = router;

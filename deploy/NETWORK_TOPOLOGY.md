@@ -1,25 +1,28 @@
 # Network topology
 
-Ledger, Payments, Compliance, Cards, Checkout, and Identity are never meant
-to be reachable from the public internet as a *credentialed API surface* —
-only two things ever are: TrustPay Backend (or, for a future tenant,
-whatever product backend they run), and the gateway (`services/gateway`).
-Different audiences, both legitimately public: a product backend serves
-that tenant's own end-user app (JWT-authenticated consumers); the gateway
+Ledger, Payments, Compliance, and Cards are never meant to be reachable
+from the public internet as a *credentialed API surface* — only two
+things are: TrustPay Backend (or, for a future tenant, whatever product
+backend they run), and the gateway (`services/gateway`). Different
+audiences, both legitimately public: a product backend serves that
+tenant's own end-user app (JWT-authenticated consumers); the gateway
 serves *external bank/developer* integration — tiered API keys, rate
 limited, one gateway process shared across every tenant, proxying to
 Ledger/Payments/Compliance/Cards/Checkout's existing APIs rather than
-exposing them directly. Identity (`services/identity` — staff login, MFA,
-RBAC, branches; Phase 2.5) is internal back-office tooling, same posture
-as Ledger/Payments/Compliance: nothing a bank's own developers or a
-consumer app ever calls directly. All eight services bind `127.0.0.1` by
-default (`BIND_HOST` in each `.env`); this is enforced at the process
-level, not left to a firewall rule someone has to remember to add.
+exposing them directly. All eight services bind `127.0.0.1` by default
+(`BIND_HOST` in each `.env`); this is enforced at the process level, not
+left to a firewall rule someone has to remember to add.
 
-**Checkout's hosted pay page and inbound provider webhook are the one
-narrow, deliberate exception** (Phase 6) — see the dedicated section below.
-Everything else about Checkout (merchant/checkout-session CRUD) follows
-the same loopback-only, gateway-proxied rule as Cards.
+**Two narrow, deliberate exceptions exist, both named in their own
+dedicated sections below**: Checkout's hosted pay page and inbound
+provider webhook (Phase 6), and Identity's entire API surface, which its
+admin console (also Phase 6) needs a staff member's browser to reach
+directly. Everything else about both services (Checkout's merchant/
+checkout-session CRUD; nothing else exists on Identity) follows the same
+loopback-only, gateway-proxied rule as Cards — Identity's exception is
+"the whole surface, gated by session/RBAC instead of network position,"
+not "gateway-proxied like everything else," so it's really its own
+category; see that section for why.
 
 This holds across all three deployment models the platform needs to
 support, but it means something slightly different in each one — network
@@ -33,9 +36,10 @@ regardless of topology.
 
 The common case: one VPS (or a small set we operate), all eight services
 plus Postgres. Everything defaults to loopback-only; `Caddyfile.example`
-proxies three public site blocks — one to TrustPay Backend (the consumer
+proxies four public site blocks — one to TrustPay Backend (the consumer
 app's own domain), one to the gateway (the API/developer-facing domain),
-and one path-scoped block to Checkout (see below) — and nothing else. No
+one path-scoped block to Checkout, and one full-site block to Identity's
+admin console (see both dedicated sections below) — and nothing else. No
 further setup needed — same-host `localhost` calls between services work
 exactly as before this change.
 
@@ -76,6 +80,49 @@ Session ids are UUIDs, not practically enumerable — deliberately no rate
 limiting on this public surface this slice, matching how a real Paystack
 checkout link works in the real world (see `services/checkout/README.md`
 for what else is named as out of scope).
+
+## Identity's public posture — the admin console (Phase 6)
+
+Unlike every other internal service, Identity's *entire* API surface is
+reachable from the public internet, proxied by Caddy on its own domain
+(`Caddyfile.example`'s `ops.trustbank.example.com` block) straight to
+Identity's loopback port — no path-scoping, unlike Checkout's exception
+above. This is a bigger shift than Checkout's, and it's deliberate, not
+an oversight:
+
+Checkout's two public paths are unauthenticated by necessity — an
+anonymous customer's browser and a payment provider's webhook can't hold
+a staff session or a tenant API key. Identity's console is the opposite
+case: every single route on it already requires either a real,
+MFA-backed `StaffSession` (`requireStaffSession()` — bearer token,
+hashed/indexed like every other credential in this platform, a 30-minute
+*sliding* idle timeout) or, for maker-checker actions, a specific RBAC
+role checked against `approvalService.js`'s `PERMISSIONS` map on top of
+that session. There is no route on Identity that trusts network position
+instead of a real credential — `GET /health` aside, which leaks nothing.
+Exposing the whole surface doesn't weaken anything the loopback binding
+was protecting; the loopback binding was never the auth boundary here,
+the session/MFA/RBAC stack was always meant to be it, same as it already
+is for the localhost-only calling pattern of every other consumer of
+this API today (an internal script, a same-host process). This is the
+same posture literally every real SaaS admin console + API pair already
+uses — Stripe's own Dashboard talks to Stripe's API over the public
+internet; nothing about "the API is reachable" is itself the risk, an
+under-authenticated route would be.
+
+`BIND_HOST` on Identity itself stays `127.0.0.1`, unchanged — Caddy,
+running on the same box, is what's actually reachable from outside, and
+it reverse-proxies to the loopback port exactly the way it already does
+for TrustPay Backend and the gateway. Nothing about Identity's own
+process-level binding changes; only what's allowed to reach it from
+outside the box does, and that's Caddy's job, not Identity's.
+
+The console itself (`services/identity/admin-console/`, a React/
+TypeScript/Vite SPA) is built to `services/identity/public/` and served
+by Identity's own process under `/console` (`express.static` plus an
+SPA-fallback route in `src/app.js`) — no new deployable service, no new
+systemd unit; `install.sh`'s existing `setup_node_service` builds it as
+part of standing up Identity itself.
 
 ## On-prem (a bank/MFB runs everything inside their own perimeter)
 

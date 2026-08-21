@@ -1,15 +1,16 @@
 # Example reverse proxy for a SaaS/single-VPS deployment (see
 # ../NETWORK_TOPOLOGY.md). Caddy is the only process that binds a public
 # interface — it terminates TLS (automatic, via Let's Encrypt) and proxies
-# to three things, on separate domains: TrustPay Backend (the consumer
+# to four things, on separate domains: TrustPay Backend (the consumer
 # app's own traffic), the gateway (external bank/developer API traffic,
-# tiered keys, rate limited — services/gateway), and Checkout's own
-# public surface (a hosted pay page and inbound provider webhooks — see
-# the narrow exception explained below). Different audiences,
+# tiered keys, rate limited — services/gateway), Checkout's own narrow
+# public surface (a hosted pay page and inbound provider webhooks), and
+# Identity's admin console (staff back-office UI plus its own API — see
+# both narrow-exception explanations below). Different audiences,
 # deliberately kept on different domains rather than one proxy routing
-# by path. Ledger, Payments, Compliance, Cards, and Identity are not
-# reachable through this or any other route from outside the box; they
-# bind 127.0.0.1 themselves regardless of what's in front of them.
+# by path. Ledger, Payments, Compliance, and Cards are not reachable
+# through this or any other route from outside the box; they bind
+# 127.0.0.1 themselves regardless of what's in front of them.
 
 trustpay.example.com {
 	reverse_proxy 127.0.0.1:8082
@@ -19,7 +20,7 @@ api.trustbank.example.com {
 	reverse_proxy 127.0.0.1:8084
 }
 
-# Checkout is loopback-bound like every other service — this is the one
+# Checkout is loopback-bound like every other service — this is a
 # narrow, deliberate exception to "nothing but the two domains above is
 # public": a hosted pay page has to be reachable by an anonymous
 # customer's browser, and an inbound provider webhook has to be
@@ -35,8 +36,24 @@ pay.trustbank.example.com {
 	respond 404
 }
 
+# Identity's admin console (services/identity) — staff back-office UI
+# plus its full API underneath it. Unlike every other service, Identity's
+# entire /v1/* surface is meant to be reached directly from a staff
+# member's browser outside the box: every route already requires an
+# authenticated, MFA-backed staff session (or a specific RBAC role) —
+# the auth model was built for this from the start, not added on top of
+# an internal-only assumption. A full site proxy, not path-scoped like
+# Checkout's block above — there's no "hide everything except two paths"
+# boundary to enforce here, since every path is already authenticated;
+# the app itself is the boundary. See ../NETWORK_TOPOLOGY.md's "Identity's
+# public posture" section for the full reasoning.
+ops.trustbank.example.com {
+	reverse_proxy 127.0.0.1:8085
+}
+
 # Nothing else is proxied. Do not add routes for :8080 (Ledger), :8081
-# (Payments), :8083 (Compliance), :8085 (Identity), or any other path on
-# :8087 (Checkout) here — if a future admin/ops tool needs to reach them
-# from outside the box, put it behind its own authenticated route or a
-# VPN, not this proxy.
+# (Payments), :8083 (Compliance), or any other path on :8087 (Checkout)
+# beyond pay.trustbank.example.com's own scoped block above — if a
+# future admin/ops tool for one of *those* services needs to reach it
+# from outside the box, put it behind its own authenticated route (the
+# way Identity's own console now is) or a VPN, not a bare reverse_proxy.
