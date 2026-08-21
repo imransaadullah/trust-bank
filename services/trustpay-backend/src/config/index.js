@@ -55,4 +55,11 @@ module.exports = {
     baseUrl: process.env.CARDS_SERVICE_URL || 'http://localhost:8086',
     apiKey: required('CARDS_API_KEY'),
   },
+  // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
+  mtls: {
+    enabled: process.env.MTLS_ENABLED === 'true',
+    certFile: process.env.MTLS_CERT_FILE,
+    keyFile: process.env.MTLS_KEY_FILE,
+    caFile: process.env.MTLS_CA_FILE,
+  },
 };

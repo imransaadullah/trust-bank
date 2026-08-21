@@ -76,4 +76,11 @@ module.exports = {
       from: process.env.SMTP_FROM || 'no-reply@trustbank.app',
     },
   },
+  // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
+  mtls: {
+    enabled: process.env.MTLS_ENABLED === 'true',
+    certFile: process.env.MTLS_CERT_FILE,
+    keyFile: process.env.MTLS_KEY_FILE,
+    caFile: process.env.MTLS_CA_FILE,
+  },
 };

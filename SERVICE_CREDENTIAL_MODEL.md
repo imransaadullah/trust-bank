@@ -90,8 +90,8 @@ else.
 
 Network position (loopback binding, `deploy/NETWORK_TOPOLOGY.md`) and credential scoping
 are both defense-in-depth layers, not a complete story on their own. mTLS for a hybrid
-deployment — where a caller genuinely lives on a different, untrusted network — is still
-open; queued in `NETWORK_TOPOLOGY.md`, not built here. See that doc's reasoning for why:
-no real hybrid deployment exists yet, and running actual PKI (issuance, rotation,
-revocation checking) is ongoing operational burden a solo team shouldn't take on before
-there's a reason to.
+deployment — where a caller genuinely lives on a different, untrusted network — is built
+and opt-in (`MTLS_ENABLED`); see `NETWORK_TOPOLOGY.md`'s mTLS section for how to turn it
+on. What's still open is automated certificate rotation and revocation checking
+(CRL/OCSP) — ongoing PKI operational burden not worth automating before there's live
+hybrid volume to justify it; rotate manually by regenerating a service's leaf cert.

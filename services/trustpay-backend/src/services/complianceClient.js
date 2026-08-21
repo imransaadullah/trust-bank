@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { getHttpsAgent } = require('../tls/mtls');
 
 // Compliance wraps responses in { success, data } same as Payments (not
 // the Ledger's bare-object shape) — see the note in paymentsClient.js
@@ -17,6 +18,7 @@ class ComplianceClient {
       const response = await axios({
         method, url: `${this.baseUrl}${path}`, data,
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        httpsAgent: getHttpsAgent(),
         timeout: 10000,
       });
       return response.data.data;

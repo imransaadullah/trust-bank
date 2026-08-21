@@ -8,6 +8,7 @@
 const axios = require('axios');
 const config = require('../config');
 const tenantBackendCredentialService = require('./tenantBackendCredentialService');
+const { getHttpsAgent } = require('../tls/mtls');
 
 const BACKENDS = {
   ledger: { baseUrl: config.ledger.baseUrl, tenantVia: 'header' },
@@ -136,6 +137,7 @@ async function execute(actionType, tenantId, payload) {
     url: `${backend.baseUrl}${action.path(tenantId, payload)}`,
     data: payload,
     headers,
+    httpsAgent: getHttpsAgent(),
     timeout: 15000,
   });
   return backend.tenantVia === 'path' ? response.data.data : response.data;

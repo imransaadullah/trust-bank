@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { getHttpsAgent } = require('../tls/mtls');
 
 // Same shape as ledgerClient.js/paymentsClient.js — this backend only
 // ever acts as one tenant, so the tenant id is baked in from config
@@ -17,6 +18,7 @@ class CardsClient {
       const response = await axios({
         method, url: `${this.baseUrl}${path}`, data,
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+        httpsAgent: getHttpsAgent(),
         timeout: 10000,
       });
       return response.data.data;

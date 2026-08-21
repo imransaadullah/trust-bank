@@ -46,4 +46,11 @@ module.exports = {
     // a whole backend offline for everyone.
     volumeThreshold: parseInt(process.env.CIRCUIT_BREAKER_VOLUME_THRESHOLD || '5', 10),
   },
+  // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
+  mtls: {
+    enabled: process.env.MTLS_ENABLED === 'true',
+    certFile: process.env.MTLS_CERT_FILE,
+    keyFile: process.env.MTLS_KEY_FILE,
+    caFile: process.env.MTLS_CA_FILE,
+  },
 };

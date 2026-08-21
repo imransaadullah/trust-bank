@@ -15,6 +15,7 @@ const CircuitBreaker = require('opossum');
 const config = require('../config');
 const logger = require('../utils/logger');
 const tenantBackendCredentialService = require('./tenantBackendCredentialService');
+const { getHttpsAgent } = require('../tls/mtls');
 const { BackendUnavailableError } = require('../utils/errors');
 
 const BACKENDS = {
@@ -31,7 +32,11 @@ async function rawCall(service, { method, path, tenantId, data }) {
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   if (backend.tenantVia === 'header') headers['X-Tenant-Id'] = tenantId;
 
-  const response = await axios({ method, url: `${backend.baseUrl}${path}`, data, headers, timeout: 15000 });
+  const response = await axios({
+    method, url: `${backend.baseUrl}${path}`, data, headers,
+    httpsAgent: getHttpsAgent(),
+    timeout: 15000,
+  });
   // Payments/Compliance (Node) wrap every response in {success,data};
   // the Ledger (Go) doesn't — unwrap here so route handlers get the
   // payload directly regardless of which backend answered.

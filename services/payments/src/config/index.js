@@ -40,4 +40,11 @@ module.exports = {
     staleMinutes: parseInt(process.env.BILLS_RECONCILIATION_STALE_MINUTES || '15', 10),
     autoRefundMinutes: parseInt(process.env.BILLS_RECONCILIATION_AUTO_REFUND_MINUTES || '60', 10),
   },
+  // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
+  mtls: {
+    enabled: process.env.MTLS_ENABLED === 'true',
+    certFile: process.env.MTLS_CERT_FILE,
+    keyFile: process.env.MTLS_KEY_FILE,
+    caFile: process.env.MTLS_CA_FILE,
+  },
 };

@@ -38,4 +38,11 @@ module.exports = {
   sanctionsFeed: {
     pollIntervalHours: clampPollHours(process.env.SANCTIONS_FEED_POLL_INTERVAL_HOURS, 24),
   },
+  // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
+  mtls: {
+    enabled: process.env.MTLS_ENABLED === 'true',
+    certFile: process.env.MTLS_CERT_FILE,
+    keyFile: process.env.MTLS_KEY_FILE,
+    caFile: process.env.MTLS_CA_FILE,
+  },
 };

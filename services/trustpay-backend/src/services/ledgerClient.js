@@ -1,6 +1,7 @@
 const axios = require('axios');
 const config = require('../config');
 const logger = require('../utils/logger');
+const { getHttpsAgent } = require('../tls/mtls');
 
 // Unlike Payments' ledgerClient (which is multi-tenant and takes a
 // tenantId per call), this backend only ever acts as one tenant — its
@@ -22,6 +23,7 @@ class LedgerClient {
           'X-Tenant-Id': this.tenantId,
           'Content-Type': 'application/json',
         },
+        httpsAgent: getHttpsAgent(),
         timeout: 10000,
       });
       return response.data;

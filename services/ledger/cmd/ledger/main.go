@@ -15,6 +15,7 @@ import (
 	"trustbank/ledger/internal/dbctx"
 	"trustbank/ledger/internal/httpapi"
 	"trustbank/ledger/internal/outbox"
+	"trustbank/ledger/internal/tlsconfig"
 )
 
 func main() {
@@ -38,7 +39,21 @@ func main() {
 	handler := httpapi.NewServer(pool)
 	server := &http.Server{Addr: cfg.BindHost + ":" + cfg.Port, Handler: handler}
 
+	tlsCfg, err := tlsconfig.ServerConfig(cfg)
+	if err != nil {
+		log.Fatalf("tlsconfig: %v", err)
+	}
+
 	go func() {
+		if tlsCfg != nil {
+			server.TLSConfig = tlsCfg
+			log.Printf("ledger service listening on %s:%s (mTLS required)", cfg.BindHost, cfg.Port)
+			// Empty cert/key paths — already loaded into server.TLSConfig above.
+			if err := server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Fatalf("https: %v", err)
+			}
+			return
+		}
 		log.Printf("ledger service listening on %s:%s", cfg.BindHost, cfg.Port)
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Fatalf("http: %v", err)

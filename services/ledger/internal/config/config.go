@@ -19,6 +19,14 @@ type Config struct {
 	// AccrualPollInterval defaults to 24h in production; tests call
 	// accrual.Consumer.RunOnce directly rather than waiting on this.
 	AccrualPollInterval time.Duration
+	// mTLS (Phase 6) — opt-in, off by default. See internal/tlsconfig's
+	// own comment for why: it defends against nothing on the default
+	// loopback-only SaaS topology, only worth turning on for a real
+	// hybrid deployment crossing an untrusted network.
+	MTLSEnabled  bool
+	MTLSCertFile string
+	MTLSKeyFile  string
+	MTLSCAFile   string
 }
 
 func Load() (*Config, error) {
@@ -49,5 +57,9 @@ func Load() (*Config, error) {
 	return &Config{
 		Port: port, BindHost: bindHost, DatabaseURL: dbURL,
 		AccrualPollInterval: accrualInterval,
+		MTLSEnabled:         os.Getenv("MTLS_ENABLED") == "true",
+		MTLSCertFile:        os.Getenv("MTLS_CERT_FILE"),
+		MTLSKeyFile:         os.Getenv("MTLS_KEY_FILE"),
+		MTLSCAFile:          os.Getenv("MTLS_CA_FILE"),
 	}, nil
 }

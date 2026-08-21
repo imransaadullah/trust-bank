@@ -64,11 +64,31 @@ address instead of `127.0.0.1` — never `0.0.0.0`. Point the caller's
 every request is what keeps this safe even though the two halves are now
 talking over a real (if private) network rather than loopback.
 
-**Still open: mTLS.** Credential scoping (`SERVICE_CREDENTIAL_MODEL.md`)
+**mTLS — built, opt-in.** Credential scoping (`SERVICE_CREDENTIAL_MODEL.md`)
 closed the "any caller can act as any tenant" gap and made every
 credential revocable, but a bearer token over a WireGuard tunnel is still
-just a bearer token — mTLS would add mutual, certificate-based caller
-identity on top. Not built yet: no real hybrid deployment exists to
-justify the ongoing PKI operational burden (issuance, rotation,
-revocation checking) before there's a reason to carry it. Build this when
-an actual hybrid deployment is on the table, not speculatively.
+just a bearer token — mTLS adds mutual, certificate-based caller identity
+on top. `deploy/generate-mtls-certs.sh` generates an internal, self-signed
+CA plus one leaf certificate per service (1-year validity, idempotent —
+reruns skip anything that already exists). Every service can require and
+verify a client certificate on its inbound side, and every
+service-to-service caller can present its own leaf cert outbound
+(`internal/tlsconfig` in the Ledger, `src/tls/mtls.js` in each Node
+service). Off by default (`MTLS_ENABLED=false`) — on the default
+loopback-only SaaS topology this defends against nothing, so it stays
+fully inert until turned on for whichever services actually cross an
+untrusted network in a real hybrid deployment:
+
+```
+MTLS_ENABLED=true
+MTLS_CERT_FILE=/path/to/<service>.crt
+MTLS_KEY_FILE=/path/to/<service>.key
+MTLS_CA_FILE=/path/to/ca.crt
+```
+
+**Still open: automated rotation and revocation checking (CRL/OCSP).**
+Same reasoning as before — real PKI lifecycle management is ongoing
+operational burden not worth automating before there's live hybrid
+volume to justify it. Rotate manually today: delete the specific
+`<service>.crt`/`.key` under `$SECRETS_DIR/mtls` and rerun
+`generate-mtls-certs.sh`.
