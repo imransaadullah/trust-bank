@@ -1,19 +1,25 @@
 # Network topology
 
-Ledger, Payments, Compliance, and Identity are never meant to be reachable
-from the public internet — only two things are: TrustPay Backend (or, for
-a future tenant, whatever product backend they run), and the gateway
-(`services/gateway`). Different audiences, both legitimately public: a
-product backend serves that tenant's own end-user app (JWT-authenticated
-consumers); the gateway serves *external bank/developer* integration —
-tiered API keys, rate limited, one gateway process shared across every
-tenant, proxying to Ledger/Payments/Compliance's existing APIs rather than
+Ledger, Payments, Compliance, Cards, Checkout, and Identity are never meant
+to be reachable from the public internet as a *credentialed API surface* —
+only two things ever are: TrustPay Backend (or, for a future tenant,
+whatever product backend they run), and the gateway (`services/gateway`).
+Different audiences, both legitimately public: a product backend serves
+that tenant's own end-user app (JWT-authenticated consumers); the gateway
+serves *external bank/developer* integration — tiered API keys, rate
+limited, one gateway process shared across every tenant, proxying to
+Ledger/Payments/Compliance/Cards/Checkout's existing APIs rather than
 exposing them directly. Identity (`services/identity` — staff login, MFA,
 RBAC, branches; Phase 2.5) is internal back-office tooling, same posture
 as Ledger/Payments/Compliance: nothing a bank's own developers or a
-consumer app ever calls directly. All six services bind `127.0.0.1` by
+consumer app ever calls directly. All eight services bind `127.0.0.1` by
 default (`BIND_HOST` in each `.env`); this is enforced at the process
 level, not left to a firewall rule someone has to remember to add.
+
+**Checkout's hosted pay page and inbound provider webhook are the one
+narrow, deliberate exception** (Phase 6) — see the dedicated section below.
+Everything else about Checkout (merchant/checkout-session CRUD) follows
+the same loopback-only, gateway-proxied rule as Cards.
 
 This holds across all three deployment models the platform needs to
 support, but it means something slightly different in each one — network
@@ -23,24 +29,53 @@ credentials (`SERVICE_CREDENTIAL_MODEL.md`, repo root — replaced the old
 shared secrets) stay in effect on every service-to-service call
 regardless of topology.
 
-## SaaS (all six services on infra we control)
+## SaaS (all eight services on infra we control)
 
-The common case: one VPS (or a small set we operate), all six services
+The common case: one VPS (or a small set we operate), all eight services
 plus Postgres. Everything defaults to loopback-only; `Caddyfile.example`
-proxies two public site blocks — one to TrustPay Backend (the consumer
-app's own domain), one to the gateway (the API/developer-facing domain) —
-and nothing else. No further setup needed — same-host `localhost` calls
-between services work exactly as before this change.
+proxies three public site blocks — one to TrustPay Backend (the consumer
+app's own domain), one to the gateway (the API/developer-facing domain),
+and one path-scoped block to Checkout (see below) — and nothing else. No
+further setup needed — same-host `localhost` calls between services work
+exactly as before this change.
 
 `install.sh` (this directory) provisions exactly this topology on a fresh
-Ubuntu 22.04/24.04 box — system deps, all six services built/migrated/
+Ubuntu 22.04/24.04 box — system deps, all eight services built/migrated/
 running under systemd, Caddy wired up. `provision-tenant.sh` onboards a
 tenant onto an already-installed box, including issuing the gateway its
-own per-tenant Ledger/Payments/Compliance credentials (the gateway is
-multi-tenant, unlike the product backend, so it can't just hold one
-credential per backend in its own `.env` — see `services/gateway/
+own per-tenant Ledger/Payments/Compliance/Cards/Checkout credentials (the
+gateway is multi-tenant, unlike the product backend, so it can't just hold
+one credential per backend in its own `.env` — see `services/gateway/
 prisma/schema.prisma`'s `TenantBackendCredential` comment). See
 `README.md` for the full runbook.
+
+## Checkout's public surface — the one narrow exception (Phase 6)
+
+Every rule above holds for Checkout's own merchant/checkout-session CRUD
+API — loopback-only, reached only through the gateway, exactly like Cards.
+But a hosted checkout page is only useful if an anonymous customer's
+browser can actually load it, and an inbound provider webhook (Paystack or
+otherwise) is only useful if the provider's servers can actually reach it
+— neither holds a tenant API key, so neither can go through the gateway's
+API-key-gated proxy the way every other cross-service call in this
+platform does.
+
+The resolution: Checkout itself stays loopback-bound like every other
+service (`BIND_HOST=127.0.0.1`, same as Ledger/Payments/Compliance/Cards/
+Identity). Only two specific path prefixes — `/pay/*` (the hosted page)
+and `/v1/webhooks/*` (the inbound provider webhook, authenticated by its
+own signature, not a credential) — are exposed via their own path-scoped
+Caddy site block, on their own domain (`Caddyfile.example`'s
+`pay.trustbank.example.com` block), distinct from both TrustPay Backend's
+and the gateway's audiences. This is a real, narrow addition to "only two
+things are public," not a general loosening of it: no other path on
+Checkout's own port is ever proxied, and every other service's posture is
+completely unchanged.
+
+Session ids are UUIDs, not practically enumerable — deliberately no rate
+limiting on this public surface this slice, matching how a real Paystack
+checkout link works in the real world (see `services/checkout/README.md`
+for what else is named as out of scope).
 
 ## On-prem (a bank/MFB runs everything inside their own perimeter)
 

@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// MERCHANT
+// A tenant's own merchant customer — the entity Checkout's hosted pages
+// collect money on behalf of. Deliberately does NOT reuse Cards'/
+// Payments' externalCustomerId convention (a caller-supplied id from an
+// existing consumer system) — Checkout mints this identity itself, so
+// Merchant.id IS the externalCustomerId handed to the Ledger's
+// OpenAccount/ConfirmDeposit calls (src/services/ledgerClient.js). No
+// separate field for it; documented here so it isn't reinvented later.
+//
+// encryptedWebhookSecret is AES-256-GCM (src/crypto/tenantSecrets.js),
+// NOT a one-way hash like ApiCredential.hashedToken — the webhook
+// runner has to reproduce this merchant's own HMAC on every outbound
+// delivery, so the plaintext must be recoverable. Unlike a bearer API
+// credential, this is meant to be re-read by the tenant indefinitely
+// (GET returns it decrypted every time), the same way Paystack's own
+// webhook secret sits visibly in a dashboard rather than being shown
+// once.
+// ============================================
+model Merchant {
+  id                     String   @id @default(uuid())
+  tenantId               String   @map("tenant_id")
+  name                   String
+  email                  String
+  webhookUrl             String?  @map("webhook_url")
+  encryptedWebhookSecret String   @map("encrypted_webhook_secret")
+  status                 String   @default("active") // 'active' | 'suspended' — suspend has no route this slice, named gap
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  @@index([tenantId])
+  @@map("merchants")
+}
+
+// ============================================
+// CHECKOUT SESSION
+// One hosted payment link/page. status is a real state machine, not
+// just a label — processing exists specifically to make the inbound
+// webhook handler safe against a retried delivery racing a mid-flight
+// Ledger call (see src/services/checkoutWebhookService.js's own
+// comment): pending -> processing -> paid | failed, or pending ->
+// expired | cancelled.
+//
+// reference is what this service generates and sends the provider as
+// ITS OWN transaction reference (Paystack: the `reference` field on
+// /transaction/initialize) — providerRef is what the provider hands
+// back, kept as a distinct field since not every provider is
+// guaranteed to echo the same value back (Paystack does; a future
+// provider might not).
+// ============================================
+model CheckoutSession {
+  id               String    @id @default(uuid())
+  tenantId         String    @map("tenant_id")
+  merchantId       String    @map("merchant_id")
+  reference        String    @unique @map("reference")
+  provider         String    // stamped from TenantCheckoutProviderConfig at creation — a later provider switch doesn't change an in-flight session
+  providerRef      String?   @map("provider_ref")
+  authorizationUrl String    @map("authorization_url") // what the hosted page's "Pay now" link points to
+  amountKobo       Int       @map("amount_kobo")
+  currency         String    @default("NGN")
+  customerEmail    String    @map("customer_email")
+  description      String?
+  status           String    @default("pending") // pending | processing | paid | failed | expired | cancelled
+  metadata         Json?
+  idempotencyKey   String    @map("idempotency_key")
+  expiresAt        DateTime  @map("expires_at")
+  paidAt           DateTime? @map("paid_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, merchantId])
+  @@index([status, expiresAt])
+  @@map("checkout_sessions")
+}
+
+// ============================================
+// TENANT CHECKOUT PROVIDER CONFIG
+// Mirrors services/cards' TenantCardProviderConfig exactly — see that
+// model's own schema comment for the full reasoning (tenantSlug routes
+// an inbound webhook before there's anything authenticated to look up).
+// ============================================
+model TenantCheckoutProviderConfig {
+  id                   String   @id @default(uuid())
+  tenantId             String   @unique @map("tenant_id")
+  tenantSlug           String   @unique @map("tenant_slug")
+  provider             String   // 'noop' | 'paystack'
+  status               String   @default("active")
+  encryptedCredentials String   @map("encrypted_credentials") // AES-256-GCM, base64: iv.authTag.ciphertext
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
+
+  @@index([provider])
+  @@map("tenant_checkout_provider_configs")
+}
+
+// ============================================
+// TENANT LEDGER CREDENTIAL — copied verbatim from services/cards.
+// ============================================
+model TenantLedgerCredential {
+  id             String   @id @default(uuid())
+  tenantId       String   @unique @map("tenant_id")
+  encryptedToken String   @map("encrypted_token")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  @@map("tenant_ledger_credentials")
+}
+
+// ============================================
+// API CREDENTIAL — copied verbatim from services/cards
+// (SERVICE_CREDENTIAL_MODEL.md's shape).
+// ============================================
+model ApiCredential {
+  id          String    @id @default(uuid())
+  tenantId    String    @map("tenant_id")
+  label       String
+  tokenPrefix String    @unique @map("token_prefix")
+  hashedToken String    @map("hashed_token")
+  scope       String // 'admin' | 'operate'
+  status      String    @default("active")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+
+  @@index([tenantId])
+  @@index([status])
+  @@map("api_credentials")
+}
+
+// ============================================
+// MERCHANT WEBHOOK DELIVERY
+// Per-MERCHANT webhook delivery (many merchants per tenant) — a Node
+// reimplementation of services/ledger/internal/outbox/outbox.go's own
+// claim/deliver/mark-result shape (pending -> processing ->
+// delivered|failed via retryCount/maxRetries), not a call into the
+// Ledger's own tenant-webhook outbox, which is one URL per TENANT and
+// wrong shape for this. tenantId is denormalized from merchant so the
+// claim query (src/services/merchantWebhookRunnerService.js) never
+// needs a join. nextAttemptAt (not just status) is the claim filter so
+// a future backoff strategy is a one-line change, not a schema change —
+// this slice always sets it back to now() on retry (linear, no
+// backoff), the same named limitation outbox.go already accepts.
+//
+// @@unique([checkoutSessionId, eventType]) makes enqueue itself
+// idempotent — a duplicate inbound provider webhook for the same
+// session can't create a second delivery row.
+// ============================================
+model MerchantWebhookDelivery {
+  id                String    @id @default(uuid())
+  tenantId          String    @map("tenant_id")
+  merchantId        String    @map("merchant_id")
+  checkoutSessionId String    @map("checkout_session_id")
+  eventType         String    @map("event_type") // only 'checkout.session.completed' exists this slice
+  payload           Json
+  status            String    @default("pending") // pending | processing | delivered | failed
+  retryCount        Int       @default(0) @map("retry_count")
+  maxRetries        Int       @default(8) @map("max_retries")
+  lastError         String?   @map("last_error")
+  nextAttemptAt     DateTime  @default(now()) @map("next_attempt_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  deliveredAt       DateTime? @map("delivered_at")
+
+  @@unique([checkoutSessionId, eventType])
+  @@index([status, nextAttemptAt])
+  @@index([tenantId])
+  @@map("merchant_webhook_deliveries")
+}

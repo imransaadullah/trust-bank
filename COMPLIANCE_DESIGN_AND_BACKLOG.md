@@ -101,21 +101,24 @@ Every gap/edge from `TRUSTPAY_MARKET_STRATEGY.md`, given a home. "Home" means wh
 |---|---|---|---|
 | "Live consumer product proves the rails" narrative vs. API-only competitors (Anchor, Blusalt) | None — marketing/sales | N/A | Tracked here so it isn't lost, but it's not a backlog item anyone implements — it's a claim that becomes true once Segments A–D are live and TrustPay has real volume. |
 
-### Segment I — Merchant Checkout (new domain, identified August 2026 — not started, deliberately deprioritized)
+### Segment I — Merchant Checkout (new domain, identified August 2026 — shipped as of this pass)
 
-**Why this isn't being worked on:** the BaaS-reseller line of business itself is still pending
-— TrustPay is trust-bank's only real tenant today, and TrustPay is a consumer product, not a
-bank/MFB reseller customer. Merchant Checkout's entire value case is "something a tenant hands
-*their* merchants" — there's no real tenant in that shape to build it for yet. Revisit once an
-actual BaaS-reseller tenant (a bank/MFB buying trust-bank as infrastructure) exists, not before
-— building this speculatively ahead of that customer would be the same mistake as building a
-live sanctions feed or a full credit-scoring model before there's a reason to carry the
-maintenance cost.
+**Why this shipped despite the earlier deferral reasoning:** the original call — wait for a real
+BaaS-reseller tenant before building this — was sound reasoning at the time, but Phase 6 as a
+whole is an explicit, standing override of that posture: build proactively rather than wait for a
+customer to hit a gap first, since by the time they ask, they may already have bounced to a
+competitor. TrustPay still isn't a BaaS-reseller tenant, but the shape-only + Noop-verified build
+cost was low, and a real, named gap that had sat undocumented for this long started to look like
+an oversight rather than a decision. The maintenance-cost comparison to a live sanctions feed or a
+full credit-scoring model no longer holds — this is bounded, provider-abstracted, and off by
+default in the sense that it costs nothing until a tenant actually configures a real provider.
 
 | Item | Touches | Phase | Note |
 |---|---|---|---|
-| Hosted checkout (Squad/Paystack-Checkout-style) for a tenant's own merchants | New "Merchant Checkout" bounded context (`CORE_BANKING_PLATFORM_ARCHITECTURE.md` §3) | **Not started, not scoped into any phase yet** | Real gap: never named in the original 16 bounded contexts, surfaced only while auditing what's missing before a real deploy. **Current status, plainly:** nothing built, no code exists. A narrower version — a 3-leg Ledger journal entry (customer → merchant → platform fee), reusing `PostJournalEntry` exactly like P2P/savings do, no new service — was scoped and ready to build, but implementation was deliberately paused in favor of the fuller product: hosted payment pages/links, merchant onboarding within a tenant, merchant-facing webhooks. That fuller shape is closer to `services/payments` than `services/ledger` — it owns product-shaped concerns (sessions, webhooks, merchant records) the way Payments owns provider integration, and would most likely call the Ledger's (still-unbuilt) checkout primitive over HTTP rather than post journal entries itself. **Whether it's a new standalone service or folded into an existing one is an open decision for whenever this segment starts**, not decided now. |
-| Market positioning this unlocks | Segment G (BaaS positioning) | Tied to Segment G | Anchor/Blusalt are API-only — a bank integrates their API and builds its own payment UI on top. A hosted checkout page a tenant can hand its merchants directly (no UI to build) is a concrete product edge over that, not just "the same API but nicer" — worth stating explicitly once this ships, not before. |
+| Hosted checkout (Squad/Paystack-Checkout-style) for a tenant's own merchants | New `services/checkout` (`CORE_BANKING_PLATFORM_ARCHITECTURE.md` §3) | **Shipped — Phase 6, item 4 of 4** | Built as its own new service, not folded into Payments or the Ledger — a `Merchant` (tenant-scoped, its `id` doubling as the Ledger's `externalCustomerId`), a `CheckoutSession` state machine (`pending → processing → paid/failed/expired/cancelled`), a swappable `CheckoutProvider` contract (`noop` + a real `paystack` implementation against Paystack's actual `/transaction/initialize`/`/transaction/verify`), a hand-written hosted pay page that never collects card data itself (redirects to the provider's own PCI-compliant page), and a per-merchant webhook delivery runner (a Node port of the Ledger's own outbox claim/deliver/retry shape). Settlement reuses the Ledger's existing `ConfirmDeposit` primitive with zero new Ledger code — the narrower 3-leg journal-entry idea below was superseded by this fuller shape, not built on top of it. Live-verified end to end: a merchant's Ledger wallet opens for real at onboarding, a simulated payment moves a real Ledger balance and delivers a correctly-signed merchant webhook, a duplicate webhook is fully idempotent (no double credit, no double delivery), a Ledger failure mid-completion reverts the session instead of stranding it, and expired/cancelled sessions correctly reject payment. |
+| Public network surface | `deploy/NETWORK_TOPOLOGY.md`, `deploy/Caddyfile.example` | Shipped alongside the above | The first feature in this platform needing a genuinely public, unauthenticated surface outside the gateway or trustpay-backend — a hosted pay page and inbound provider webhook can't sit behind a tenant API key. Resolved as a narrow, explicit exception: Checkout itself stays loopback-bound like every other service; only `/pay/*` and `/v1/webhooks/*` are exposed, via their own path-scoped Caddy site block on their own domain. |
+| Market positioning this unlocks | Segment G (BaaS positioning) | Tied to Segment G | Anchor/Blusalt are API-only — a bank integrates their API and builds its own payment UI on top. A hosted checkout page a tenant can hand its merchants directly (no UI to build) is a concrete product edge over that, not just "the same API but nicer." Real now, not aspirational, though it becomes a provable sales point only once a real BaaS-reseller tenant is actually using it. |
+| Deliberately not built this slice | — | Named, not hidden | Merchant suspend/update (create/get/list only), refunds, split-payment/platform-fee entries (would need a new 3-leg Ledger primitive, a real "Checkout v2" item), webhook backoff beyond linear retry, failed-session reissue, rate limiting on the public surface (session ids are UUIDs, not practically enumerable — a documented decision matching how a real Paystack checkout link works). |
 
 ### Segment H — Deliberately deferred (tracked so it isn't re-litigated)
 

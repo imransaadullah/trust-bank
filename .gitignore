@@ -12,4 +12,6 @@ services/identity/node_modules/
 services/identity/.env
 services/cards/node_modules/
 services/cards/.env
+services/checkout/node_modules/
+services/checkout/.env
 *.log

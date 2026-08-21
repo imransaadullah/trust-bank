@@ -12,6 +12,7 @@ const accountsRoutes = require('./routes/accounts');
 const identityRoutes = require('./routes/identity');
 const complianceRoutes = require('./routes/compliance');
 const cardsRoutes = require('./routes/cards');
+const checkoutRoutes = require('./routes/checkout');
 
 function createApp() {
   const app = express();
@@ -40,6 +41,7 @@ function createApp() {
   app.use('/v1/tenants', identityRoutes);
   app.use('/v1/tenants', complianceRoutes);
   app.use('/v1/tenants', cardsRoutes);
+  app.use('/v1/tenants', checkoutRoutes);
 
   app.use(errorHandler);
 

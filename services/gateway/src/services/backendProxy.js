@@ -23,6 +23,7 @@ const BACKENDS = {
   payments: { baseUrl: config.payments.baseUrl, tenantVia: 'path' },
   compliance: { baseUrl: config.compliance.baseUrl, tenantVia: 'path' },
   cards: { baseUrl: config.cards.baseUrl, tenantVia: 'path' },
+  checkout: { baseUrl: config.checkout.baseUrl, tenantVia: 'path' },
 };
 
 async function rawCall(service, { method, path, tenantId, data }) {

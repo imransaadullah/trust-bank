@@ -19,6 +19,7 @@ router.get('/ready', async (req, res) => {
     payments: config.payments.baseUrl,
     compliance: config.compliance.baseUrl,
     cards: config.cards.baseUrl,
+    checkout: config.checkout.baseUrl,
   };
 
   const checks = {};

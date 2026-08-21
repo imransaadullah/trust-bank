@@ -53,6 +53,7 @@ PAYMENTS_URL="${PAYMENTS_SERVICE_URL:-http://127.0.0.1:8081}"
 COMPLIANCE_URL="${COMPLIANCE_SERVICE_URL:-http://127.0.0.1:8083}"
 GATEWAY_URL="${GATEWAY_SERVICE_URL:-http://127.0.0.1:8084}"
 CARDS_URL="${CARDS_SERVICE_URL:-http://127.0.0.1:8086}"
+CHECKOUT_URL="${CHECKOUT_SERVICE_URL:-http://127.0.0.1:8087}"
 
 SLUG="" NAME="" LICENSE_TYPE="OTHER" BASE_CURRENCY="NGN" PRODUCT_BACKEND_ENV="" OPS_ADMIN_EMAIL=""
 
@@ -179,6 +180,20 @@ bootstrap_ledger_credentials() {
     [ -n "$token3" ] || die "could not parse Ledger operate token for Cards"
     printf '%s' "$token3" > "$TENANT_DIR/ledger_operate_cards.token"; chmod 600 "$TENANT_DIR/ledger_operate_cards.token"
   fi
+
+  # A fourth, distinct Ledger operate credential for Checkout's own
+  # merchant-onboarding (OpenAccount) and completion (ConfirmDeposit)
+  # calls (services/checkout/src/services/ledgerClient.js) — same
+  # reasoning as Payments'/Cards' own above.
+  if [ ! -f "$TENANT_DIR/ledger_operate_checkout.token" ]; then
+    log "Bootstrapping Ledger operate credential for $SLUG's Checkout service"
+    local out4 token4
+    out4="$(cd "$APP_ROOT/services/ledger" && MIGRATE_DATABASE_URL="$migrate_url" \
+      go run ./cmd/bootstrap-key --scope operate --tenant-id "$TENANT_ID" --label "$SLUG-checkout")"
+    token4="$(extract_token "$out4" lgr_live)"
+    [ -n "$token4" ] || die "could not parse Ledger operate token for Checkout"
+    printf '%s' "$token4" > "$TENANT_DIR/ledger_operate_checkout.token"; chmod 600 "$TENANT_DIR/ledger_operate_checkout.token"
+  fi
 }
 
 # ---------------------------------------------------------------------------
@@ -261,9 +276,19 @@ bootstrap_gateway_credentials() {
     printf '%s' "$token" > "$TENANT_DIR/cards_operate_gateway.token"; chmod 600 "$TENANT_DIR/cards_operate_gateway.token"
   fi
 
+  if [ ! -f "$TENANT_DIR/checkout_operate_gateway.token" ]; then
+    log "Bootstrapping Checkout operate credential for $SLUG's gateway"
+    local out token
+    out="$(cd "$APP_ROOT/services/checkout" && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_checkout?schema=public" \
+      node scripts/bootstrapKey.js --tenant-id "$TENANT_ID" --scope operate --label "$SLUG-gateway")"
+    token="$(extract_token "$out" cko_live)"
+    [ -n "$token" ] || die "could not parse Checkout operate token for gateway"
+    printf '%s' "$token" > "$TENANT_DIR/checkout_operate_gateway.token"; chmod 600 "$TENANT_DIR/checkout_operate_gateway.token"
+  fi
+
   # The gateway's own admin-tier key for this tenant — bootstrapped
   # directly, same chicken-and-egg fix as every other service's first
-  # credential. Used below to store the four tokens above, and to issue
+  # credential. Used below to store the five tokens above, and to issue
   # a starter sandbox key; cached for any later rerun.
   if [ ! -f "$TENANT_DIR/gateway_admin.token" ]; then
     log "Bootstrapping gateway admin key for $SLUG"
@@ -278,7 +303,7 @@ bootstrap_gateway_credentials() {
 
 store_gateway_backend_credentials() {
   [ -f "$TENANT_DIR/gateway_backend_credentials_stored" ] && return
-  log "Storing $SLUG's Ledger/Payments/Compliance/Cards credentials in the gateway"
+  log "Storing $SLUG's Ledger/Payments/Compliance/Cards/Checkout credentials in the gateway"
   local admin_token; admin_token="$(cat "$TENANT_DIR/gateway_admin.token")"
 
   curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
@@ -300,6 +325,11 @@ store_gateway_backend_credentials() {
     -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
     -d "$(jq -n --arg t "$(cat "$TENANT_DIR/cards_operate_gateway.token")" '{service:"cards",token:$t}')" >/dev/null \
     || die "storing the gateway's Cards credential failed"
+
+  curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/checkout_operate_gateway.token")" '{service:"checkout",token:$t}')" >/dev/null \
+    || die "storing the gateway's Checkout credential failed"
 
   touch "$TENANT_DIR/gateway_backend_credentials_stored"
 }
@@ -333,6 +363,21 @@ store_cards_ledger_credential() {
     -d "$(jq -n --arg t "$(cat "$TENANT_DIR/ledger_operate_cards.token")" '{token:$t}')" >/dev/null \
     || die "storing Cards' Ledger credential failed"
   touch "$TENANT_DIR/cards_ledger_credential_stored"
+}
+
+# Checkout's own Ledger credential — same reasoning as Payments'/Cards'
+# own above. Needs ledger_operate_checkout.token
+# (bootstrap_ledger_credentials) and checkout_admin.token
+# (bootstrap_node_service_credentials checkout).
+store_checkout_ledger_credential() {
+  [ -f "$TENANT_DIR/checkout_ledger_credential_stored" ] && return
+  log "Storing $SLUG's Ledger credential in Checkout (per-tenant, not .env)"
+  local admin_token; admin_token="$(cat "$TENANT_DIR/checkout_admin.token")"
+  curl -sf -X POST "$CHECKOUT_URL/v1/tenants/$TENANT_ID/ledger-credential" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/ledger_operate_checkout.token")" '{token:$t}')" >/dev/null \
+    || die "storing Checkout's Ledger credential failed"
+  touch "$TENANT_DIR/checkout_ledger_credential_stored"
 }
 
 issue_starter_sandbox_key() {
@@ -434,9 +479,19 @@ provision_sandbox_twin() {
   bootstrap_ledger_credentials
   bootstrap_node_service_credentials payments pay_live trustbank_payments
   bootstrap_node_service_credentials compliance cmp_live trustbank_compliance
+  # Cards/Checkout were previously missing here — a sandbox-tier card
+  # issuance or checkout session would fail against the sandbox twin
+  # with TenantLedgerCredentialNotFoundError, since the gateway could
+  # already reach Cards/Checkout (bootstrap_gateway_credentials covers
+  # both) but neither service had its own Ledger credential stored for
+  # this tenant. Fixed here for both, alongside Checkout's own build.
+  bootstrap_node_service_credentials cards crd_live trustbank_cards
+  bootstrap_node_service_credentials checkout cko_live trustbank_checkout
   bootstrap_gateway_credentials
   store_gateway_backend_credentials
   store_payments_ledger_credential
+  store_cards_ledger_credential
+  store_checkout_ledger_credential
   publish_default_policy
   local sandbox_tenant_id="$TENANT_ID"
 
@@ -586,10 +641,12 @@ main() {
   bootstrap_node_service_credentials payments pay_live trustbank_payments
   bootstrap_node_service_credentials compliance cmp_live trustbank_compliance
   bootstrap_node_service_credentials cards crd_live trustbank_cards
+  bootstrap_node_service_credentials checkout cko_live trustbank_checkout
   bootstrap_gateway_credentials
   store_gateway_backend_credentials
   store_payments_ledger_credential
   store_cards_ledger_credential
+  store_checkout_ledger_credential
   issue_starter_sandbox_key
   publish_default_policy
   write_env_snippet

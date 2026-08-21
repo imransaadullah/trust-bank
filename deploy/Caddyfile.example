@@ -1,11 +1,13 @@
 # Example reverse proxy for a SaaS/single-VPS deployment (see
 # ../NETWORK_TOPOLOGY.md). Caddy is the only process that binds a public
 # interface — it terminates TLS (automatic, via Let's Encrypt) and proxies
-# to exactly two things, on separate domains: TrustPay Backend (the
-# consumer app's own traffic) and the gateway (external bank/developer API
-# traffic, tiered keys, rate limited — services/gateway). Different
-# audiences, deliberately kept on different domains rather than one
-# proxy routing by path. Ledger, Payments, and Compliance are not
+# to three things, on separate domains: TrustPay Backend (the consumer
+# app's own traffic), the gateway (external bank/developer API traffic,
+# tiered keys, rate limited — services/gateway), and Checkout's own
+# public surface (a hosted pay page and inbound provider webhooks — see
+# the narrow exception explained below). Different audiences,
+# deliberately kept on different domains rather than one proxy routing
+# by path. Ledger, Payments, Compliance, Cards, and Identity are not
 # reachable through this or any other route from outside the box; they
 # bind 127.0.0.1 themselves regardless of what's in front of them.
 
@@ -17,7 +19,24 @@ api.trustbank.example.com {
 	reverse_proxy 127.0.0.1:8084
 }
 
+# Checkout is loopback-bound like every other service — this is the one
+# narrow, deliberate exception to "nothing but the two domains above is
+# public": a hosted pay page has to be reachable by an anonymous
+# customer's browser, and an inbound provider webhook has to be
+# reachable by Paystack's (or another provider's) servers, and neither
+# holds a tenant API key to go through the gateway's proxy. Only these
+# two path prefixes are ever exposed — the merchant/checkout-session
+# CRUD API stays exactly as internal as any other service's, reached
+# only through the gateway (see ../NETWORK_TOPOLOGY.md's own section on
+# this).
+pay.trustbank.example.com {
+	@public path /pay/* /v1/webhooks/*
+	reverse_proxy @public 127.0.0.1:8087
+	respond 404
+}
+
 # Nothing else is proxied. Do not add routes for :8080 (Ledger), :8081
-# (Payments), or :8083 (Compliance) here — if a future admin/ops tool
-# needs to reach them from outside the box, put it behind its own
-# authenticated route or a VPN, not this proxy.
+# (Payments), :8083 (Compliance), :8085 (Identity), or any other path on
+# :8087 (Checkout) here — if a future admin/ops tool needs to reach them
+# from outside the box, put it behind its own authenticated route or a
+# VPN, not this proxy.

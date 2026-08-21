@@ -219,6 +219,24 @@ setup_node_service() {
         env_file_set IDENTITY_ENCRYPTION_KEY "$identity_key" "$env_file"
         capture_critical_secret identity IDENTITY_ENCRYPTION_KEY "$identity_key"
         ;;
+      cards)
+        # Same stakes as the other services' own *_ENCRYPTION_KEY —
+        # encrypts TenantLedgerCredential/TenantCardProviderConfig at
+        # rest. Was missing from this case statement even though Cards
+        # itself was already shipped — this service was never actually
+        # stood up by a fresh install; fixed here alongside Checkout.
+        local cards_key; cards_key="$(gen_secret)"
+        env_file_set CARDS_ENCRYPTION_KEY "$cards_key" "$env_file"
+        capture_critical_secret cards CARDS_ENCRYPTION_KEY "$cards_key"
+        ;;
+      checkout)
+        # Same stakes as Cards' own key — encrypts
+        # TenantLedgerCredential/TenantCheckoutProviderConfig and every
+        # merchant's own webhook signing secret at rest.
+        local checkout_key; checkout_key="$(gen_secret)"
+        env_file_set CHECKOUT_ENCRYPTION_KEY "$checkout_key" "$env_file"
+        capture_critical_secret checkout CHECKOUT_ENCRYPTION_KEY "$checkout_key"
+        ;;
     esac
   fi
 }
@@ -243,7 +261,7 @@ install_systemd_units() {
   local tmp; tmp="$(mktemp -d)"
   local unit
 
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustbank-cards trustbank-checkout trustpay-backend; do
     render_template "$SCRIPT_DIR/templates/${unit}.service.tmpl" "$tmp/${unit}.service" \
       "APP_ROOT=${APP_ROOT}" "DEPLOY_USER=${DEPLOY_USER}" "NODE_BIN=${NODE_BIN}"
     sudo cp "$tmp/${unit}.service" "/etc/systemd/system/${unit}.service"
@@ -263,7 +281,7 @@ install_systemd_units() {
   rm -rf "$tmp"
 
   sudo systemctl daemon-reload
-  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend; do
+  for unit in trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustbank-cards trustbank-checkout trustpay-backend; do
     sudo systemctl enable "$unit"
     sudo systemctl restart "$unit"
   done
@@ -294,13 +312,18 @@ main() {
   setup_node_service compliance trustbank_compliance
   setup_node_service gateway trustbank_gateway
   setup_node_service identity trustbank_identity
+  # Both were previously missing from main() despite being marked
+  # shipped — Cards/Checkout were never actually stood up by a fresh
+  # install. Fixed here alongside Checkout's own build.
+  setup_node_service cards trustbank_cards
+  setup_node_service checkout trustbank_checkout
   setup_node_service trustpay-backend trustpay_backend
   setup_backup_env
   install_systemd_units
   setup_caddy
 
   log "Done. Service status:"
-  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustpay-backend || true
+  sudo systemctl --no-pager status trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustbank-cards trustbank-checkout trustpay-backend || true
   cat <<EOF
 
 Next steps:

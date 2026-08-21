@@ -1,5 +1,6 @@
-// Admin-tier only — stores this tenant's Ledger/Payments/Compliance/Cards
-// operate credential (issued the normal way, via each backend's own
+// Admin-tier only — stores this tenant's Ledger/Payments/Compliance/
+// Cards/Checkout operate credential (issued the normal way, via each
+// backend's own
 // bootstrap-key/bootstrapKey.js, then handed to the gateway to hold on
 // the tenant's behalf). deploy/provision-tenant.sh calls this once per
 // tenant per backend; see TenantBackendCredential's schema comment for
@@ -16,7 +17,7 @@ router.post('/:tenantId/backend-credentials', adminOnly, async (req, res, next) 
   try {
     const { service, token } = req.body;
     if (!tenantBackendCredentialService.VALID_SERVICES.includes(service) || !token) {
-      return res.status(400).json({ success: false, error: "service must be 'ledger', 'payments', 'compliance', or 'cards', and token is required" });
+      return res.status(400).json({ success: false, error: "service must be 'ledger', 'payments', 'compliance', 'cards', or 'checkout', and token is required" });
     }
     await tenantBackendCredentialService.store({ tenantId: req.params.tenantId, service, token });
     res.status(201).json({ success: true, data: { tenantId: req.params.tenantId, service, status: 'stored' } });

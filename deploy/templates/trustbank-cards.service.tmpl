@@ -1,0 +1,32 @@
+[Unit]
+Description=trust-bank Cards Service
+Documentation=https://github.com/imransaadullah/trust-bank
+After=network.target postgresql.service
+Wants=postgresql.service
+# Fires once systemd gives up retrying (past Restart=always's default
+# burst limit), not on every transient crash — see deploy/notify-failure.sh.
+OnFailure=trustbank-notify-failure@%n.service
+
+[Service]
+Type=exec
+User={{DEPLOY_USER}}
+Group={{DEPLOY_USER}}
+WorkingDirectory={{APP_ROOT}}/services/cards
+EnvironmentFile=-{{APP_ROOT}}/services/cards/.env
+
+ExecStart={{NODE_BIN}} src/index.js
+
+Restart=always
+RestartSec=5
+
+Environment=NODE_ENV=production
+
+StandardOutput=journal
+StandardError=journal
+
+# Security
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
