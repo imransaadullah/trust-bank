@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"trustbank/ledger/internal/domain"
@@ -15,6 +16,29 @@ type createTenantRequest struct {
 	DeploymentMode string `json:"deploymentMode"`
 	BaseCurrency   string `json:"baseCurrency"`
 	WebhookURL     string `json:"webhookUrl"`
+}
+
+// handleGetTenant returns the caller's own tenant identity — the tenant
+// is resolved from the verified credential (see requireApiKey), never
+// from a path parameter, matching every other operate-scoped route.
+func (s *Server) handleGetTenant(w http.ResponseWriter, r *http.Request) {
+	tenantID, _ := tenantFromContext(r.Context())
+
+	t, err := tenant.Get(r.Context(), s.pool, tenantID)
+	if err != nil {
+		if errors.Is(err, tenant.ErrNotFound) {
+			respondError(w, http.StatusNotFound, "tenant not found")
+			return
+		}
+		respondError(w, http.StatusInternalServerError, "internal error")
+		return
+	}
+
+	respondJSON(w, http.StatusOK, map[string]any{
+		"id": t.ID, "slug": t.Slug, "name": t.Name,
+		"licenseType": t.LicenseType, "deploymentMode": t.DeploymentMode,
+		"status": t.Status, "baseCurrency": t.BaseCurrency,
+	})
 }
 
 func (s *Server) handleCreateTenant(w http.ResponseWriter, r *http.Request) {

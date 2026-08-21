@@ -6,6 +6,7 @@ package tenant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/jackc/pgx/v5"
@@ -16,6 +17,12 @@ import (
 	"trustbank/ledger/internal/dbctx"
 	"trustbank/ledger/internal/domain"
 )
+
+// ErrNotFound would mean a valid, verified credential is bound to a tenant
+// row that no longer exists — a data-integrity problem, not a normal
+// caller error, but returned rather than panicking so the HTTP layer can
+// still respond cleanly.
+var ErrNotFound = errors.New("tenant: not found")
 
 const (
 	FloatAccountNumber           = "SYS-FLOAT"
@@ -136,6 +143,35 @@ func Create(ctx context.Context, pool *pgxpool.Pool, in CreateInput) (*domain.Te
 	}
 
 	return t, sysAccounts, nil
+}
+
+// Get returns the tenant's own identity row — a bank's admin dashboard
+// reading back its own name/status, not platform-admin provisioning.
+// tenantID is trusted from the caller's already-verified credential
+// context, not a caller-supplied path parameter, so no separate
+// authorization check is needed here beyond the RLS scoping WithTenant
+// already applies.
+func Get(ctx context.Context, pool *pgxpool.Pool, tenantID string) (*domain.Tenant, error) {
+	var t *domain.Tenant
+	err := dbctx.WithTenant(ctx, pool, tenantID, func(ctx context.Context, tx pgx.Tx) error {
+		row := tx.QueryRow(ctx, `
+			SELECT id, slug, name, license_type, deployment_mode, status, base_currency, created_at
+			FROM tenants WHERE id = $1
+		`, tenantID)
+		found := &domain.Tenant{}
+		if err := row.Scan(&found.ID, &found.Slug, &found.Name, &found.LicenseType, &found.DeploymentMode, &found.Status, &found.BaseCurrency, &found.CreatedAt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrNotFound
+			}
+			return err
+		}
+		t = found
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return t, nil
 }
 
 // EnsureLoanLossAccounts creates GL 1250/5200 and their system ledger

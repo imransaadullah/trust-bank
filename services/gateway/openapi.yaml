@@ -64,6 +64,23 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/ReadyResponse' }
 
+  /v1/tenants/{tenantId}:
+    get:
+      summary: Read back this tenant's own identity
+      description: >
+        Admin-tier key required. Proxies to the Ledger, the tenant
+        registry's system of record — nothing about a tenant's own
+        name/status/license was readable through any API before this
+        route existed.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantResponse' }
+
   /v1/tenants/{tenantId}/api-keys:
     post:
       summary: Issue a sandbox or production API key
@@ -601,6 +618,20 @@ components:
             tokenPrefix: { type: string }
             rateLimitPerMinute: { type: integer }
             token: { type: string, description: "Shown once — cannot be retrieved again." }
+    TenantResponse:
+      type: object
+      properties:
+        success: { type: boolean }
+        data:
+          type: object
+          properties:
+            id: { type: string, format: uuid }
+            slug: { type: string }
+            name: { type: string }
+            licenseType: { type: string }
+            deploymentMode: { type: string }
+            status: { type: string, enum: [ACTIVE, SUSPENDED, OFFBOARDING] }
+            baseCurrency: { type: string }
     ApiKeySummary:
       type: object
       properties:

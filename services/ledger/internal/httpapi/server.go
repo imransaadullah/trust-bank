@@ -33,6 +33,8 @@ func NewServer(pool *pgxpool.Pool) http.Handler {
 	mux.Handle("GET /v1/credentials", admin(s.handleListCredentials))
 	mux.Handle("POST /v1/credentials/{credId}/revoke", admin(s.handleRevokeCredential))
 
+	mux.Handle("GET /v1/tenant", operate(s.handleGetTenant))
+
 	mux.Handle("POST /v1/journal-entries", operate(s.handlePostJournalEntry))
 	mux.Handle("POST /v1/journal-entries/{id}/reverse", operate(s.handleReverseJournalEntry))
 	mux.Handle("GET /v1/accounts/{id}/balance", operate(s.handleGetBalance))

@@ -16,6 +16,14 @@ services/identity/.env
 services/identity/public/
 services/identity/admin-console/node_modules/
 services/identity/admin-console/tsconfig.tsbuildinfo
+# Build artifact of gateway/admin-console/ — public/console/ specifically,
+# NOT services/gateway/public/ itself, which is the checked-in
+# hand-written Redoc docs page served at /docs. A shared outDir with
+# Vite's emptyOutDir would delete that page; admin-console builds into
+# its own subdirectory instead (see vite.config.ts's outDir comment).
+services/gateway/public/console/
+services/gateway/admin-console/node_modules/
+services/gateway/admin-console/tsconfig.tsbuildinfo
 services/cards/node_modules/
 services/cards/.env
 services/checkout/node_modules/

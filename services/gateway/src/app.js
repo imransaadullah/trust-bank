@@ -5,6 +5,7 @@ const cors = require('cors');
 
 const errorHandler = require('./middleware/errorHandler');
 const healthRoutes = require('./routes/health');
+const tenantsRoutes = require('./routes/tenants');
 const apiKeysRoutes = require('./routes/apiKeys');
 const backendCredentialsRoutes = require('./routes/backendCredentials');
 const sandboxRoutes = require('./routes/sandbox');
@@ -32,8 +33,22 @@ function createApp() {
   });
   app.use('/docs', express.static(path.join(__dirname, '../public')));
 
+  // Tenant admin dashboard (services/gateway/admin-console) — a bank's
+  // own technical/integration admin managing API keys, usage, sandbox
+  // status. Served from public/console/, a build-artifact subdirectory
+  // of the checked-in /docs static folder above, not the folder itself
+  // (see admin-console/vite.config.ts's outDir comment for why). Unlike
+  // /docs, this is a real client-routed React Router app, so it needs
+  // its own SPA-fallback route for deep links to survive a hard refresh
+  // — the same regex shape services/identity's app.js already uses.
+  app.use('/console', express.static(path.join(__dirname, '../public/console')));
+  app.get(/^\/console(\/.*)?$/, (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/console/index.html'));
+  });
+
   // Admin-tier: provisioning. Sandbox/production-tier: the actual
   // proxied banking routes a bank's engineers integrate against.
+  app.use('/v1/tenants', tenantsRoutes);
   app.use('/v1/tenants', apiKeysRoutes);
   app.use('/v1/tenants', backendCredentialsRoutes);
   app.use('/v1/tenants', sandboxRoutes);

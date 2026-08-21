@@ -62,12 +62,21 @@ const (
 	DedicatedCluster DeploymentMode = "DEDICATED"
 )
 
+type TenantStatus string
+
+const (
+	TenantActive      TenantStatus = "ACTIVE"
+	TenantSuspended   TenantStatus = "SUSPENDED"
+	TenantOffboarding TenantStatus = "OFFBOARDING"
+)
+
 type Tenant struct {
 	ID             string
 	Slug           string
 	Name           string
 	LicenseType    LicenseType
 	DeploymentMode DeploymentMode
+	Status         TenantStatus
 	BaseCurrency   string
 	CreatedAt      time.Time
 }

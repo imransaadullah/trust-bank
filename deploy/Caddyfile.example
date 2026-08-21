@@ -16,6 +16,12 @@ trustpay.example.com {
 	reverse_proxy 127.0.0.1:8082
 }
 
+# Also serves the tenant admin dashboard (services/gateway/admin-console,
+# a bank's own technical/integration admin managing API keys, usage,
+# sandbox status) at /console — no separate domain needed, unlike
+# Identity's own console: the gateway was already this platform's public
+# tenant-facing surface before the dashboard existed, so it just coexists
+# here alongside /docs and the tenant-proxy routes.
 api.trustbank.example.com {
 	reverse_proxy 127.0.0.1:8084
 }
