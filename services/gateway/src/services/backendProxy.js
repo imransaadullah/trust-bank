@@ -26,9 +26,9 @@ const BACKENDS = {
   checkout: { baseUrl: config.checkout.baseUrl, tenantVia: 'path' },
 };
 
-async function rawCall(service, { method, path, tenantId, data }) {
+async function rawCall(service, { method, path, tenantId, data, scope = 'operate' }) {
   const backend = BACKENDS[service];
-  const token = await tenantBackendCredentialService.get(tenantId, service);
+  const token = await tenantBackendCredentialService.get(tenantId, service, scope);
 
   const headers = { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' };
   if (backend.tenantVia === 'header') headers['X-Tenant-Id'] = tenantId;
@@ -68,7 +68,7 @@ for (const service of Object.keys(BACKENDS)) {
 
 /**
  * @param {'ledger'|'payments'|'compliance'|'cards'} service
- * @param {{method: string, path: string, tenantId: string, data?: object}} opts
+ * @param {{method: string, path: string, tenantId: string, data?: object, scope?: 'operate'|'admin'}} opts
  */
 async function call(service, opts) {
   const breaker = breakers[service];

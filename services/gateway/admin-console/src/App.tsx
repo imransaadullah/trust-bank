@@ -6,6 +6,7 @@ import { OverviewPage } from './routes/OverviewPage';
 import { ApiKeysPage } from './routes/ApiKeysPage';
 import { UsagePage } from './routes/UsagePage';
 import { SandboxPage } from './routes/SandboxPage';
+import { CompliancePoliciesPage } from './routes/CompliancePoliciesPage';
 
 export default function App() {
   return (
@@ -23,6 +24,7 @@ export default function App() {
         <Route path="api-keys" element={<ApiKeysPage />} />
         <Route path="usage" element={<UsagePage />} />
         <Route path="sandbox" element={<SandboxPage />} />
+        <Route path="compliance-policies" element={<CompliancePoliciesPage />} />
       </Route>
     </Routes>
   );

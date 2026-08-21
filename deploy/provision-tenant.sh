@@ -266,6 +266,25 @@ bootstrap_gateway_credentials() {
     printf '%s' "$token" > "$TENANT_DIR/compliance_operate_gateway.token"; chmod 600 "$TENANT_DIR/compliance_operate_gateway.token"
   fi
 
+  # A second, admin-scope Compliance credential — distinct from the
+  # operate-scope one just above (used by the existing kyc-tier-check/
+  # device-check decisioning proxy) and from this script's own
+  # compliance_admin.token (used once, internally, to publish default
+  # policy). This one is specifically for the tenant admin dashboard's
+  # compliance-policy management screens, mirroring the identical
+  # pattern already used for identity's own compliance admin credential
+  # below (bootstrap_identity_backend_credentials) — a distinct, labeled
+  # credential per consumer rather than reusing one across services.
+  if [ ! -f "$TENANT_DIR/compliance_admin_gateway.token" ]; then
+    log "Bootstrapping Compliance admin credential for $SLUG's gateway admin console"
+    local out token
+    out="$(cd "$APP_ROOT/services/compliance" && DATABASE_URL="$(pg_superuser_url "$PG_SUPERUSER_PW_FILE")/trustbank_compliance?schema=public" \
+      node scripts/bootstrapKey.js --tenant-id "$TENANT_ID" --scope admin --label "$SLUG-gateway-admin-console")"
+    token="$(extract_token "$out" cmp_live)"
+    [ -n "$token" ] || die "could not parse Compliance admin token for gateway"
+    printf '%s' "$token" > "$TENANT_DIR/compliance_admin_gateway.token"; chmod 600 "$TENANT_DIR/compliance_admin_gateway.token"
+  fi
+
   if [ ! -f "$TENANT_DIR/cards_operate_gateway.token" ]; then
     log "Bootstrapping Cards operate credential for $SLUG's gateway"
     local out token
@@ -320,6 +339,11 @@ store_gateway_backend_credentials() {
     -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
     -d "$(jq -n --arg t "$(cat "$TENANT_DIR/compliance_operate_gateway.token")" '{service:"compliance",token:$t}')" >/dev/null \
     || die "storing the gateway's Compliance credential failed"
+
+  curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
+    -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \
+    -d "$(jq -n --arg t "$(cat "$TENANT_DIR/compliance_admin_gateway.token")" '{service:"compliance",token:$t,scope:"admin"}')" >/dev/null \
+    || die "storing the gateway's Compliance admin credential failed"
 
   curl -sf -X POST "$GATEWAY_URL/v1/tenants/$TENANT_ID/backend-credentials" \
     -H "Authorization: Bearer $admin_token" -H "Content-Type: application/json" \

@@ -5,10 +5,10 @@
 const express = require('express');
 const apiKeyService = require('../services/apiKeyService');
 const usageService = require('../services/usageService');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAdminAccess } = require('../middleware/auth');
 
 const router = express.Router();
-const adminOnly = requireApiKey({ allowedTiers: ['admin'] });
+const adminOnly = requireAdminAccess();
 const DATE_PARAM_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 router.post('/:tenantId/api-keys', adminOnly, async (req, res, next) => {

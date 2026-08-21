@@ -57,3 +57,11 @@ export interface SandboxMapping {
   tenantId: string;
   sandboxTenantId: string;
 }
+
+export type PolicyType = 'kyc' | 'device' | 'loan-eligibility' | 'card-issuance' | 'monitoring';
+
+/** A versioned policy row — shape varies by type, always carries version/effectiveFrom. */
+export type PolicyRecord = Record<string, unknown> & {
+  version: number;
+  effectiveFrom: string;
+};

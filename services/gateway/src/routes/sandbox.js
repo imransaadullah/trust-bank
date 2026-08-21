@@ -6,10 +6,10 @@
 // schema comment and src/middleware/resolveEffectiveTenant.js.
 const express = require('express');
 const sandboxTenantService = require('../services/sandboxTenantService');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAdminAccess } = require('../middleware/auth');
 
 const router = express.Router();
-const adminOnly = requireApiKey({ allowedTiers: ['admin'] });
+const adminOnly = requireAdminAccess();
 
 router.post('/:tenantId/sandbox', adminOnly, async (req, res, next) => {
   try {

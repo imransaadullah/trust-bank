@@ -18,9 +18,10 @@ class CredentialNotFoundError extends GatewayError {
 // provisioned before the gateway can call anything on their behalf. See
 // deploy/provision-tenant.sh's new step and POST /v1/tenants/:id/backend-credentials.
 class TenantBackendCredentialNotFoundError extends GatewayError {
-  constructor(tenantId, service) {
+  constructor(tenantId, service, scope = 'operate') {
+    const scopeNote = scope === 'operate' ? '' : ` (${scope}-scope)`;
     super(
-      `Tenant ${tenantId} has no ${service} credential provisioned for the gateway — run provision-tenant.sh or POST /v1/tenants/${tenantId}/backend-credentials`,
+      `Tenant ${tenantId} has no ${service}${scopeNote} credential provisioned for the gateway — run provision-tenant.sh or POST /v1/tenants/${tenantId}/backend-credentials`,
       'BACKEND_CREDENTIAL_NOT_FOUND', 424
     );
   }
@@ -35,6 +36,23 @@ class SandboxNotProvisionedError extends GatewayError {
       `Tenant ${tenantId} has no sandbox tenant provisioned yet — run provision-tenant.sh's sandbox step or POST /v1/tenants/${tenantId}/sandbox`,
       'SANDBOX_NOT_PROVISIONED', 424
     );
+  }
+}
+
+// Thrown when a pasted Identity staff-session token fails verification
+// against Identity's own GET /v1/me (bad/expired/revoked token, wrong
+// role, or wrong tenant) — see identityClient.js and routes/staffLogin.js.
+class StaffSessionInvalidError extends GatewayError {
+  constructor(reason = 'Invalid or expired staff session') {
+    super(reason, 'STAFF_SESSION_INVALID', 401);
+  }
+}
+
+// Thrown by requireAdminAccess when a gws_live_ GatewaySession token
+// fails verification — mirrors Identity's own SessionInvalidError.
+class GatewaySessionInvalidError extends GatewayError {
+  constructor() {
+    super('Invalid or expired session', 'SESSION_INVALID', 401);
   }
 }
 
@@ -58,4 +76,5 @@ class BackendUnavailableError extends GatewayError {
 module.exports = {
   GatewayError, CredentialNotFoundError, TenantBackendCredentialNotFoundError,
   SandboxNotProvisionedError, RateLimitExceededError, BackendUnavailableError,
+  StaffSessionInvalidError, GatewaySessionInvalidError,
 };

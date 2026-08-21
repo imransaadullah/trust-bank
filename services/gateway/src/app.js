@@ -12,6 +12,8 @@ const sandboxRoutes = require('./routes/sandbox');
 const accountsRoutes = require('./routes/accounts');
 const identityRoutes = require('./routes/identity');
 const complianceRoutes = require('./routes/compliance');
+const compliancePoliciesRoutes = require('./routes/compliancePolicies');
+const staffLoginRoutes = require('./routes/staffLogin');
 const cardsRoutes = require('./routes/cards');
 const checkoutRoutes = require('./routes/checkout');
 
@@ -49,12 +51,14 @@ function createApp() {
   // Admin-tier: provisioning. Sandbox/production-tier: the actual
   // proxied banking routes a bank's engineers integrate against.
   app.use('/v1/tenants', tenantsRoutes);
+  app.use('/v1/tenants', staffLoginRoutes);
   app.use('/v1/tenants', apiKeysRoutes);
   app.use('/v1/tenants', backendCredentialsRoutes);
   app.use('/v1/tenants', sandboxRoutes);
   app.use('/v1/tenants', accountsRoutes);
   app.use('/v1/tenants', identityRoutes);
   app.use('/v1/tenants', complianceRoutes);
+  app.use('/v1/tenants', compliancePoliciesRoutes);
   app.use('/v1/tenants', cardsRoutes);
   app.use('/v1/tenants', checkoutRoutes);
 

@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useQueryClient } from '@tanstack/react-query';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { probeLogin, getTenant } from '../api/tenants';
+import { staffLogin, logout as logoutRequest } from '../api/staffLogin';
 import { getTenantId, getApiKey, setCredentials, clearCredentials, setUnauthorizedHandler } from '../api/client';
 import type { Tenant } from '../types/api';
 
@@ -9,6 +10,7 @@ interface SessionContextValue {
   tenant: Tenant | null;
   loading: boolean;
   login: (tenantId: string, apiKey: string) => Promise<void>;
+  loginWithStaffSession: (tenantId: string, staffSessionToken: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -53,13 +55,28 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     setTenant(result);
   };
 
+  const loginWithStaffSession = async (tenantId: string, staffSessionToken: string) => {
+    // staffLogin exchanges the pasted Identity token for a Gateway-native
+    // gws_live_ session token — that's the credential actually stored and
+    // used afterward, never the raw staff token.
+    const { token } = await staffLogin(tenantId, staffSessionToken);
+    setCredentials(tenantId, token);
+    const result = await getTenant();
+    setTenant(result);
+  };
+
   const logout = () => {
+    // Best-effort, fire-and-forget: logout should never get "stuck"
+    // waiting on a network call the server-side revoke doesn't strictly
+    // need the browser to wait for — same reasoning the staff console's
+    // own logout uses.
+    logoutRequest().catch(() => {});
     clearSession();
     navigate('/login', { replace: true });
   };
 
   return (
-    <SessionContext.Provider value={{ tenant, loading, login, logout }}>
+    <SessionContext.Provider value={{ tenant, loading, login, loginWithStaffSession, logout }}>
       {children}
     </SessionContext.Provider>
   );

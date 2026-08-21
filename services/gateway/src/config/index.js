@@ -32,6 +32,16 @@ module.exports = {
   compliance: { baseUrl: process.env.COMPLIANCE_SERVICE_URL || 'http://localhost:8083' },
   cards: { baseUrl: process.env.CARDS_SERVICE_URL || 'http://localhost:8086' },
   checkout: { baseUrl: process.env.CHECKOUT_SERVICE_URL || 'http://localhost:8087' },
+  // Identity — not a proxied backend like the five above (no per-tenant
+  // TenantBackendCredential; identityClient.js calls it with whatever raw
+  // staff-session token the caller presents, once, at staff-login time).
+  identity: { baseUrl: process.env.IDENTITY_SERVICE_URL || 'http://localhost:8085' },
+  // GatewaySession (routes/staffLogin.js) — same 30-minute sliding idle
+  // default as Identity's own StaffSession, for a consistent UX across
+  // both consoles rather than a coincidence worth diverging on.
+  gatewaySession: {
+    idleTimeoutMinutes: parseInt(process.env.GATEWAY_SESSION_IDLE_TIMEOUT_MINUTES || '30', 10),
+  },
   // Circuit breaker tuning — one breaker per backend service
   // (src/services/backendProxy.js), so Ledger trouble doesn't trip
   // Payments' or Compliance's.

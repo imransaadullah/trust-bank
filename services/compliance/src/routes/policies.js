@@ -20,6 +20,19 @@ router.post('/:tenantId/compliance/kyc-policy', requireApiKey('admin'), async (r
   }
 });
 
+router.get('/:tenantId/compliance/kyc-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction, tier } = req.query;
+    if (tier == null) {
+      return res.status(400).json({ success: false, error: 'tier query param is required' });
+    }
+    const policy = await policyService.getCurrentKYCPolicy(req.params.tenantId, jurisdiction || 'NG', Number(tier));
+    res.json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:tenantId/compliance/device-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { jurisdiction, maxActiveDevices, newDeviceCooldownHours, newDeviceLimitKobo, effectiveFrom } = req.body;
@@ -31,6 +44,16 @@ router.post('/:tenantId/compliance/device-policy', requireApiKey('admin'), async
       maxActiveDevices, newDeviceCooldownHours, newDeviceLimitKobo, effectiveFrom,
     });
     res.status(201).json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:tenantId/compliance/device-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction } = req.query;
+    const policy = await policyService.getCurrentDevicePolicy(req.params.tenantId, jurisdiction || 'NG');
+    res.json({ success: true, data: policy });
   } catch (err) {
     next(err);
   }
@@ -52,6 +75,16 @@ router.post('/:tenantId/compliance/loan-eligibility-policy', requireApiKey('admi
   }
 });
 
+router.get('/:tenantId/compliance/loan-eligibility-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction } = req.query;
+    const policy = await policyService.getCurrentLoanEligibilityPolicy(req.params.tenantId, jurisdiction || 'NG');
+    res.json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:tenantId/compliance/card-issuance-policy', requireApiKey('admin'), async (req, res, next) => {
   try {
     const { jurisdiction, minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo, effectiveFrom } = req.body;
@@ -63,6 +96,16 @@ router.post('/:tenantId/compliance/card-issuance-policy', requireApiKey('admin')
       minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo, effectiveFrom,
     });
     res.status(201).json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
+router.get('/:tenantId/compliance/card-issuance-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction } = req.query;
+    const policy = await policyService.getCurrentCardIssuancePolicy(req.params.tenantId, jurisdiction || 'NG');
+    res.json({ success: true, data: policy });
   } catch (err) {
     next(err);
   }

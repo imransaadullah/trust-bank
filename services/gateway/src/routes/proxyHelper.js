@@ -4,11 +4,11 @@
 // across accounts/identity/compliance), not speculatively.
 const backendProxy = require('../services/backendProxy');
 
-function proxyRoute(service, method, pathBuilder, { statusCode = 200 } = {}) {
+function proxyRoute(service, method, pathBuilder, { statusCode = 200, scope = 'operate' } = {}) {
   return async (req, res, next) => {
     try {
       const data = await backendProxy.call(service, {
-        method, path: pathBuilder(req), tenantId: req.effectiveTenantId, data: req.body,
+        method, path: pathBuilder(req), tenantId: req.effectiveTenantId, data: req.body, scope,
       });
       res.status(statusCode).json({ success: true, data });
     } catch (err) {

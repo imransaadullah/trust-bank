@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { to: '/api-keys', label: 'API keys' },
   { to: '/usage', label: 'Usage' },
   { to: '/sandbox', label: 'Sandbox' },
+  { to: '/compliance-policies', label: 'Compliance policies' },
 ];
 
 export function AppShell() {
@@ -20,9 +21,10 @@ export function AppShell() {
         </div>
         <div className="flex items-center gap-4 text-sm">
           {tenant && <span className="text-ink-soft">{tenant.name}</span>}
-          {/* Logging out just discards the locally-held key — there's no
-              server-side session to revoke, only a bearer credential the
-              browser was holding in sessionStorage. */}
+          {/* A gws_live_ staff session has a real server-side row
+              SessionContext.logout revokes before clearing local state;
+              a gw_live_ API key has nothing session-shaped to revoke, so
+              the same call is a harmless no-op for that login mode. */}
           <button onClick={logout} className="text-brass hover:text-brass-strong text-sm font-medium">
             Log out
           </button>

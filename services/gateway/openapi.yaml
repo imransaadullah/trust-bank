@@ -81,6 +81,48 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/TenantResponse' }
 
+  /v1/tenants/{tenantId}/staff-login:
+    post:
+      summary: Exchange a pasted Identity staff-session token for a GatewaySession
+      description: >
+        An alternative to pasting an admin-tier API key: a bank's own
+        ops_admin staff member (already logged into the staff console)
+        can paste that same session token here instead. Verifies it
+        server-to-server against Identity's GET /v1/me, then issues a
+        short-lived, Gateway-native session token (gws_live_...) accepted
+        anywhere an admin-tier gw_live_ key is. Rejects any role other
+        than ops_admin, and any session bound to a different tenant.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [staffSessionToken]
+              properties:
+                staffSessionToken: { type: string, description: "A raw stf_live_... token from services/identity" }
+      responses:
+        '201':
+          description: "{ token, tenantId, staffEmail, expiresAt }"
+        '403':
+          description: Role isn't ops_admin, or the session belongs to a different tenant
+
+  /v1/tenants/{tenantId}/logout:
+    post:
+      summary: Revoke the current GatewaySession
+      description: >
+        Admin-tier key or GatewaySession accepted. A gws_live_ session has
+        a real server-side row to revoke; called with a gw_live_ API key
+        instead, this is a no-op (an API key has nothing session-shaped
+        to log out of).
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      responses:
+        '200':
+          description: "{ loggedOut: true }"
+
   /v1/tenants/{tenantId}/api-keys:
     post:
       summary: Issue a sandbox or production API key
@@ -441,6 +483,179 @@ paths:
       responses:
         '200':
           description: "{ allowed, capAppliedKobo?, cooldownHours?, reason?, policyVersion }"
+
+  /v1/tenants/{tenantId}/compliance/kyc-policy:
+    get:
+      summary: Read the current KYC-tier policy
+      description: >
+        Admin-tier key required — a separate, admin-scope compliance
+        credential from the operate-scope one kyc-tier-check/device-check
+        use (see TenantBackendCredential's schema comment). 404 with
+        code NO_POLICY_CONFIGURED if none has ever been published for
+        this tier.
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: tier, in: query, required: true, schema: { type: integer } }
+        - { name: jurisdiction, in: query, schema: { type: string, default: NG } }
+      responses:
+        '200':
+          description: The current versioned KYCTierPolicy row
+        '404':
+          description: No policy published for this tier yet
+    post:
+      summary: Publish a new KYC-tier policy version
+      description: Admin-tier key required. Publishing never updates a row — it inserts a new, higher version.
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tier, requiredVerifications]
+              properties:
+                jurisdiction: { type: string, default: NG }
+                tier: { type: integer }
+                requiredVerifications: { type: array, items: { type: string } }
+                dailyLimitKobo: { type: integer }
+                singleTxnLimitKobo: { type: integer }
+                effectiveFrom: { type: string, format: date-time }
+      responses:
+        '201':
+          description: The newly published policy version
+
+  /v1/tenants/{tenantId}/compliance/device-policy:
+    get:
+      summary: Read the current device-binding policy
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: jurisdiction, in: query, schema: { type: string, default: NG } }
+      responses:
+        '200': { description: The current versioned DeviceBindingPolicy row }
+        '404': { description: No policy published yet }
+    post:
+      summary: Publish a new device-binding policy version
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newDeviceCooldownHours, newDeviceLimitKobo]
+              properties:
+                jurisdiction: { type: string, default: NG }
+                maxActiveDevices: { type: integer }
+                newDeviceCooldownHours: { type: integer }
+                newDeviceLimitKobo: { type: integer }
+                effectiveFrom: { type: string, format: date-time }
+      responses:
+        '201': { description: The newly published policy version }
+
+  /v1/tenants/{tenantId}/compliance/loan-eligibility-policy:
+    get:
+      summary: Read the current loan-eligibility policy
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: jurisdiction, in: query, schema: { type: string, default: NG } }
+      responses:
+        '200': { description: The current versioned LoanEligibilityPolicy row }
+        '404': { description: No policy published yet }
+    post:
+      summary: Publish a new loan-eligibility policy version
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minKycTier, maxLoanAmountKobo, maxTenorDays, interestRateAnnualBps]
+              properties:
+                jurisdiction: { type: string, default: NG }
+                minKycTier: { type: integer }
+                maxLoanAmountKobo: { type: integer }
+                maxTenorDays: { type: integer }
+                interestRateAnnualBps: { type: integer }
+                effectiveFrom: { type: string, format: date-time }
+      responses:
+        '201': { description: The newly published policy version }
+
+  /v1/tenants/{tenantId}/compliance/card-issuance-policy:
+    get:
+      summary: Read the current card-issuance policy
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: jurisdiction, in: query, schema: { type: string, default: NG } }
+      responses:
+        '200': { description: The current versioned CardIssuancePolicy row }
+        '404': { description: No policy published yet }
+    post:
+      summary: Publish a new card-issuance policy version
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [minKycTier, maxCardsPerCustomer, dailySpendLimitKobo, singleTxnLimitKobo]
+              properties:
+                jurisdiction: { type: string, default: NG }
+                minKycTier: { type: integer }
+                maxCardsPerCustomer: { type: integer }
+                dailySpendLimitKobo: { type: integer }
+                singleTxnLimitKobo: { type: integer }
+                effectiveFrom: { type: string, format: date-time }
+      responses:
+        '201': { description: The newly published policy version }
+
+  /v1/tenants/{tenantId}/compliance/monitoring-policy:
+    get:
+      summary: Read the current transaction-monitoring policy
+      tags: [Admin]
+      parameters:
+        - { $ref: '#/components/parameters/TenantId' }
+        - { name: jurisdiction, in: query, schema: { type: string, default: NG } }
+      responses:
+        '200': { description: The current versioned TransactionMonitoringPolicy row }
+        '404': { description: No policy published yet }
+    post:
+      summary: Publish a new transaction-monitoring policy version
+      tags: [Admin]
+      parameters: [{ $ref: '#/components/parameters/TenantId' }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - velocityWindowHours
+                - velocityMaxTransactionCount
+                - velocityMaxDistinctCounterparties
+                - structuringThresholdKobo
+                - structuringWindowCount
+                - largeSingleTxnThresholdKobo
+              properties:
+                jurisdiction: { type: string, default: NG }
+                velocityWindowHours: { type: integer }
+                velocityMaxTransactionCount: { type: integer }
+                velocityMaxDistinctCounterparties: { type: integer }
+                structuringThresholdKobo: { type: integer }
+                structuringWindowCount: { type: integer }
+                largeSingleTxnThresholdKobo: { type: integer }
+                effectiveFrom: { type: string, format: date-time }
+      responses:
+        '201': { description: The newly published policy version }
 
   /v1/tenants/{tenantId}/cards:
     post:

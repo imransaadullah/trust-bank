@@ -2,12 +2,12 @@
 // only, same posture as api-keys/usage/sandbox: a bank's technical admin
 // reading their own name/status, not a banking-transaction route.
 const express = require('express');
-const { requireApiKey } = require('../middleware/auth');
+const { requireAdminAccess } = require('../middleware/auth');
 const { resolveEffectiveTenant } = require('../middleware/resolveEffectiveTenant');
 const { proxyRoute } = require('./proxyHelper');
 
 const router = express.Router();
-const adminOnly = [requireApiKey({ allowedTiers: ['admin'] }), resolveEffectiveTenant];
+const adminOnly = [requireAdminAccess(), resolveEffectiveTenant];
 
 router.get('/:tenantId', adminOnly, proxyRoute('ledger', 'GET', () => '/v1/tenant'));
 

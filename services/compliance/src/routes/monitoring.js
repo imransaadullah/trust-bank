@@ -34,6 +34,16 @@ router.post('/:tenantId/compliance/monitoring-policy', requireApiKey('admin'), a
   }
 });
 
+router.get('/:tenantId/compliance/monitoring-policy', requireApiKey('admin'), async (req, res, next) => {
+  try {
+    const { jurisdiction } = req.query;
+    const policy = await monitoringPolicyService.getCurrentMonitoringPolicy(req.params.tenantId, jurisdiction || 'NG');
+    res.json({ success: true, data: policy });
+  } catch (err) {
+    next(err);
+  }
+});
+
 router.post('/:tenantId/compliance/screen-transaction', requireApiKey('operate'), async (req, res, next) => {
   try {
     const { jurisdiction, userId, amount, counterpartyId, recentTransactions, transactionRef } = req.body;
