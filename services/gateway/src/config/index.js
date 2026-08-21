@@ -46,6 +46,13 @@ module.exports = {
     // a whole backend offline for everyone.
     volumeThreshold: parseInt(process.env.CIRCUIT_BREAKER_VOLUME_THRESHOLD || '5', 10),
   },
+  // Usage-transparency dashboard (Phase 6) — how often
+  // usageRollupService aggregates past days' RateLimitCounter rows into
+  // ApiKeyDailyUsage and prunes the raw rows. Hourly is plenty; today's
+  // counters stay live and readable directly regardless of this interval.
+  usageRollup: {
+    pollIntervalMinutes: parseInt(process.env.USAGE_ROLLUP_POLL_INTERVAL_MINUTES || '60', 10),
+  },
   // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
   mtls: {
     enabled: process.env.MTLS_ENABLED === 'true',

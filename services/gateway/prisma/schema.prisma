@@ -32,6 +32,7 @@ model ApiKey {
   lastUsedAt        DateTime? @map("last_used_at")
 
   rateLimitCounters RateLimitCounter[]
+  dailyUsage        ApiKeyDailyUsage[]
 
   @@index([tenantId])
   @@index([status])
@@ -58,6 +59,36 @@ model RateLimitCounter {
 
   @@unique([apiKeyId, windowStart])
   @@map("rate_limit_counters")
+}
+
+// ============================================
+// API KEY DAILY USAGE
+// The usage-transparency dashboard's own read model — Phase 6.
+// RateLimitCounter only ever holds live per-minute windows (nothing
+// rolls it up or reads it back historically, and nothing prunes it —
+// every window since the service started otherwise stays a live row
+// forever). usageRollupService aggregates every past day's counters into
+// one row per (apiKeyId, date) here, then deletes the raw rows it just
+// summed — closing that unbounded-growth gap as a side effect of
+// building the thing a usage dashboard actually needs. tenantId is
+// denormalized (not just derived via apiKey.tenantId) so a tenant-wide
+// usage query never has to join through a key that's since been
+// revoked. Deliberately usage counts only — no cost/quota/plan fields:
+// Anchor (the closest direct BaaS competitor) runs negotiated pricing,
+// not self-serve metered billing, so this is transparency, not billing.
+// ============================================
+model ApiKeyDailyUsage {
+  id           String   @id @default(uuid())
+  apiKeyId     String   @map("api_key_id")
+  tenantId     String   @map("tenant_id")
+  date         DateTime @map("date")
+  requestCount Int      @default(0) @map("request_count")
+
+  apiKey ApiKey @relation(fields: [apiKeyId], references: [id])
+
+  @@unique([apiKeyId, date])
+  @@index([tenantId])
+  @@map("api_key_daily_usage")
 }
 
 // ============================================

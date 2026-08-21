@@ -128,19 +128,48 @@ the actual `deploy/provision-tenant.sh` (not by hand):
   proxied correctly to a real Cards service, and an existing
   Ledger-proxied route (account open) was confirmed unaffected by the
   change in the same run.
+- **Self-serve API key management** (Phase 6) — issue/list/revoke/rotate
+  (`POST`/`GET /v1/tenants/:id/api-keys`, `.../:apiKeyId/revoke`,
+  `.../:apiKeyId/rotate`) are all reachable with the tenant's own `admin`
+  key — zero ops involvement. This was already true before this pass for
+  issue/list/revoke; only `rotate` (revoke + reissue in one call) was
+  actually new. The only credential ever handed out by
+  `provision-tenant.sh` is the *first* `admin` key — the same
+  root-credential pattern any serious API platform uses (an AWS root
+  access key, Stripe's original secret key), not a missing login system.
+- **Usage-transparency dashboard** (Phase 6) — `GET
+  /v1/tenants/:id/usage?from=&to=` (`admin`-tier only) returns per-key
+  daily request counts for a date range (default: last 30 days), merging
+  `ApiKeyDailyUsage`'s rolled-up history with today's still-live
+  `RateLimitCounter` rows so "today" is never a blind spot.
+  `usageRollupRunner` (hourly by default,
+  `USAGE_ROLLUP_POLL_INTERVAL_MINUTES`) aggregates each past day's raw
+  per-minute counters into one row per `(apiKeyId, date)` and prunes the
+  raw rows it just summed — `RateLimitCounter` had no retention at all
+  before this, every window since the service started staying a live row
+  forever; closed as a side effect of building the read model a usage
+  dashboard needs. Deliberately usage counts only, no cost/quota/plan
+  fields — Anchor (the closest direct BaaS competitor) runs negotiated
+  subscription pricing, not self-serve metered billing, so this is
+  transparency, not a billing engine. Live-verified: rolled-up daily
+  totals matched hand-inserted backdated counters exactly, a second
+  immediate rerun of the rollup was a true no-op (proving the
+  single-transaction insert+prune can't double-count on a crash/restart),
+  and the existing 429-after-limit rate-limiting behavior was confirmed
+  unaffected by the new background job.
 
 **Explicit placeholders:**
 - **No jest test suite yet** — this pass's verification was entirely live
   integration testing (see above), not unit tests. Worth adding, not
   blocking for a first slice.
-- **No self-serve key management, usage/billing dashboard, or status
-  page** — `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §10's fuller
-  developer-portal vision. Self-serve key issuance needs a bank's-own-
-  developer login system that doesn't exist yet (today, `admin` keys are
-  only ever handed out by whoever runs `provision-tenant.sh`); usage/
-  billing dashboards need metering/billing infrastructure that doesn't
-  exist anywhere in this platform. Both are real, separate initiatives,
-  not a natural extension of rendering the docs.
+- **No real billing/metering engine** — cost computation, invoicing, and
+  plan/quota enforcement are a real, separate initiative from the
+  usage-transparency dashboard above, deliberately out of scope per the
+  same Anchor-informed research: this market segment sells on negotiated
+  pricing, not self-serve metered billing, so building one speculatively
+  isn't a natural extension of what actually exists in the market today.
+- **No status page** — `CORE_BANKING_PLATFORM_ARCHITECTURE.md` §10's
+  fuller developer-portal vision; not started.
 - **`TenantBackendCredential`'s single credential per (tenant, service)**
   — same shape as every other credential in this platform, but if a
   tenant's Ledger/Payments/Compliance operate credential is ever revoked

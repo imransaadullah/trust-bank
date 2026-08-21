@@ -71,6 +71,19 @@ async function revoke({ tenantId, apiKeyId }) {
   if (result.count === 0) throw new CredentialNotFoundError(apiKeyId);
 }
 
+// Revoke + reissue in one call, carrying over the same label/tier/limit —
+// the ergonomic gap self-serve key rotation actually had (issue/list/
+// revoke already existed and were already self-serve via the tenant's
+// own admin key).
+async function rotate({ tenantId, apiKeyId }) {
+  const existing = await prisma.apiKey.findFirst({ where: { id: apiKeyId, tenantId, status: 'active' } });
+  if (!existing) throw new CredentialNotFoundError(apiKeyId);
+  await revoke({ tenantId, apiKeyId });
+  return issue({
+    tenantId, label: existing.label, tier: existing.tier, rateLimitPerMinute: existing.rateLimitPerMinute,
+  });
+}
+
 async function list({ tenantId }) {
   return prisma.apiKey.findMany({
     where: { tenantId },
@@ -82,4 +95,4 @@ async function list({ tenantId }) {
   });
 }
 
-module.exports = { issue, verify, revoke, list, TIERS };
+module.exports = { issue, verify, revoke, rotate, list, TIERS };
