@@ -40,6 +40,19 @@ async function get({ tenantId, sessionId }) {
 }
 
 /**
+ * A real gap this slice closes — only single-lookup-by-id existed before.
+ * merchantId is optional for a tenant caller (see resolveMerchantScope);
+ * always set for a merchant caller, locking them to their own sessions.
+ */
+async function list({ tenantId, merchantId, status, limit }) {
+  return prisma.checkoutSession.findMany({
+    where: { tenantId, ...(merchantId ? { merchantId } : {}), ...(status ? { status } : {}) },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(limit ? Number(limit) : 50, 200),
+  });
+}
+
+/**
  * The concrete implementation of "GET verify/:reference is the
  * authoritative status check" — used by the hosted page's own GET
  * handler to cover the race between the customer's redirect-back and
@@ -90,4 +103,4 @@ async function cancel({ tenantId, sessionId }) {
   return prisma.checkoutSession.update({ where: { id: session.id }, data: { status: 'cancelled' } });
 }
 
-module.exports = { create, get, getAndSync, getPublic, getAndSyncPublic, cancel };
+module.exports = { create, get, list, getAndSync, getPublic, getAndSyncPublic, cancel };

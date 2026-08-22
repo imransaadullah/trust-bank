@@ -38,6 +38,32 @@ module.exports = {
     // lazily flips to 'expired' on next read.
     defaultExpiryMinutes: parseInt(process.env.CHECKOUT_SESSION_DEFAULT_EXPIRY_MINUTES || '30', 10),
   },
+  // Merchant-dashboard login (services/checkout/admin-console) — a single,
+  // shared auth-provider choice across every tenant's merchants, not a
+  // per-tenant config: AuthCore is one shared account (the same one
+  // trustpay-backend already uses), and tenant isolation is enforced by
+  // always resolving a Merchant via {tenantId, email}, never by email
+  // alone (see providers/authProviders/registry.js). Defaults to 'noop'
+  // so a fresh checkout of this repo boots without real AuthCore
+  // credentials — a real deployment sets AUTH_PROVIDER=authcore.
+  authProvider: {
+    name: process.env.AUTH_PROVIDER || 'noop',
+    // AuthCore-specific — optional at boot (only 'noop' needs to work
+    // without them), required lazily by AuthCoreProvider itself the
+    // first time a real request needs them, same "optional at config-
+    // load, load-bearing on first real use" shape AUTHCORE_JWKS_URL
+    // already has in trustpay-backend's own config.
+    baseUrl: process.env.AUTHCORE_BASE_URL || 'https://authcore.akoti.com.ng',
+    projectKey: process.env.AUTHCORE_PROJECT_KEY,
+    jwksUrl: process.env.AUTHCORE_JWKS_URL,
+    projectId: process.env.AUTHCORE_PROJECT_ID,
+  },
+  merchantSession: {
+    // Same 30-minute sliding idle default as Identity's StaffSession and
+    // Gateway's GatewaySession — a consistent UX across every console in
+    // this platform rather than a coincidence worth diverging on.
+    idleTimeoutMinutes: parseInt(process.env.MERCHANT_SESSION_IDLE_TIMEOUT_MINUTES || '30', 10),
+  },
   // mTLS (Phase 6) — opt-in, off by default. See src/tls/mtls.js.
   mtls: {
     enabled: process.env.MTLS_ENABLED === 'true',

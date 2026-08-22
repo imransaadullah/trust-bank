@@ -14,15 +14,20 @@ exposing them directly. All eight services bind `127.0.0.1` by default
 left to a firewall rule someone has to remember to add.
 
 **Two narrow, deliberate exceptions exist, both named in their own
-dedicated sections below**: Checkout's hosted pay page and inbound
-provider webhook (Phase 6), and Identity's entire API surface, which its
-admin console (also Phase 6) needs a staff member's browser to reach
-directly. Everything else about both services (Checkout's merchant/
-checkout-session CRUD; nothing else exists on Identity) follows the same
-loopback-only, gateway-proxied rule as Cards — Identity's exception is
-"the whole surface, gated by session/RBAC instead of network position,"
-not "gateway-proxied like everything else," so it's really its own
-category; see that section for why.
+dedicated sections below**: Checkout's public surface (Phase 6) — the
+hosted pay page and inbound provider webhook, unauthenticated by
+necessity, plus a later addition, the merchant dashboard, credential-gated
+— and Identity's entire API surface, which its admin console (also Phase
+6) needs a staff member's browser to reach directly. Everything else about
+both services (Checkout's tenant/checkout-session admin CRUD — issuing
+credentials, ledger-credential, checkout-config, and the create/cancel
+side of checkout sessions and merchants; nothing else exists on Identity)
+follows the same loopback-only, gateway-proxied rule as Cards — Identity's
+exception is "the whole surface, gated by session/RBAC instead of network
+position," not "gateway-proxied like everything else," so it's really its
+own category; see that section for why. Checkout's merchant dashboard
+addition borrows the same reasoning at a smaller scope — see its own
+paragraph below.
 
 This holds across all three deployment models the platform needs to
 support, but it means something slightly different in each one — network
@@ -80,6 +85,40 @@ Session ids are UUIDs, not practically enumerable — deliberately no rate
 limiting on this public surface this slice, matching how a real Paystack
 checkout link works in the real world (see `services/checkout/README.md`
 for what else is named as out of scope).
+
+### The merchant dashboard addition
+
+A later addition to this same public surface, for a different reason than
+the two paths above: a merchant (a tenant's own customer using the hosted
+checkout) has no gateway API key any more than an anonymous shopper does
+— their only credential is a `mch_live_` `MerchantSession`, minted by
+Checkout's own email-OTP login (`POST /merchant-login/verify-otp`), so
+their dashboard (`services/checkout/admin-console`, mounted at
+`/merchant`) can't reach its API through the gateway's key-gated proxy
+either. `pay.trustbank.example.com`'s `@public` matcher grew three more
+prefixes for this: `/merchant/*` (the console's static assets and
+SPA-fallback route), `/v1/tenants/*/merchant-login/*` (send-otp/verify-otp
+— themselves unauthenticated by design, since they *are* the login step —
+plus logout), and `/v1/tenants/*/checkout-sessions*` /
+`/v1/tenants/*/merchants/*` (the routes the console calls after login:
+listing sessions, reading a merchant's own record, listing webhook
+deliveries, rotating the webhook secret).
+
+Unlike `/pay/*` and `/v1/webhooks/*`, this addition is credential-gated —
+every one of those routes runs `resolveMerchantScope()` first, which locks
+a merchant-session caller to their own `merchantId` and rejects anything
+else (`forbidCrossMerchant`). Opening the path doesn't weaken that check;
+it only makes the app reachable from outside the box, the same reasoning
+Identity's console section below uses at a bigger scope. Two of the four
+newly-public path prefixes (`checkout-sessions*` and `merchants/*`) also
+happen to cover routes that are *not* merchant-facing — `POST
+/checkout-sessions` (a tenant backend creating a session) and `POST
+/merchants` (a tenant provisioning a new merchant) share the same path
+prefix as the merchant-facing `GET` routes next to them. Those stay
+exactly as protected as before: they still require a real tenant `operate`
+`ApiCredential`, which a merchant session can't satisfy — Caddy's path
+list controls network reachability, not authorization, so widening it here
+doesn't change who those two routes will actually accept.
 
 ## Identity's public posture — the admin console (Phase 6)
 

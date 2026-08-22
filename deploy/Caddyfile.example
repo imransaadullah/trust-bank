@@ -4,9 +4,9 @@
 # to four things, on separate domains: TrustPay Backend (the consumer
 # app's own traffic), the gateway (external bank/developer API traffic,
 # tiered keys, rate limited — services/gateway), Checkout's own narrow
-# public surface (a hosted pay page and inbound provider webhooks), and
-# Identity's admin console (staff back-office UI plus its own API — see
-# both narrow-exception explanations below). Different audiences,
+# public surface (a hosted pay page, inbound provider webhooks, and the
+# merchant dashboard), and Identity's admin console (staff back-office UI
+# plus its own API — see all three narrow-exception explanations below). Different audiences,
 # deliberately kept on different domains rather than one proxy routing
 # by path. Ledger, Payments, Compliance, and Cards are not reachable
 # through this or any other route from outside the box; they bind
@@ -31,13 +31,22 @@ api.trustbank.example.com {
 # public": a hosted pay page has to be reachable by an anonymous
 # customer's browser, and an inbound provider webhook has to be
 # reachable by Paystack's (or another provider's) servers, and neither
-# holds a tenant API key to go through the gateway's proxy. Only these
-# two path prefixes are ever exposed — the merchant/checkout-session
-# CRUD API stays exactly as internal as any other service's, reached
-# only through the gateway (see ../NETWORK_TOPOLOGY.md's own section on
-# this).
+# holds a tenant API key to go through the gateway's proxy. A third
+# exception, added alongside those two: the merchant dashboard
+# (services/checkout/admin-console) — a merchant has no gateway API key
+# either, only their own OTP-derived mch_live_ MerchantSession, so its
+# UI (/merchant/*) and the specific /v1/tenants/*/... routes it calls
+# (merchant-login, checkout-sessions, merchants) have to be reachable
+# directly too. Unlike the other two, this one IS credential-gated
+# (resolveMerchantScope on every route) — opening the path doesn't
+# bypass that, it only makes the app itself reachable from outside the
+# box the same way Identity's console already is (see that block's own
+# comment below). Every other Checkout route — credentials,
+# ledger-credential, checkout-config, and POST/create-side
+# merchant/checkout-session routes tenant backends call — stays exactly
+# as internal as before, reached only through the gateway.
 pay.trustbank.example.com {
-	@public path /pay/* /v1/webhooks/*
+	@public path /pay/* /v1/webhooks/* /merchant/* /v1/tenants/*/merchant-login/* /v1/tenants/*/checkout-sessions* /v1/tenants/*/merchants/*
 	reverse_proxy @public 127.0.0.1:8087
 	respond 404
 }

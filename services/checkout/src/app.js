@@ -1,3 +1,4 @@
+const path = require('path');
 const express = require('express');
 const helmet = require('helmet');
 const cors = require('cors');
@@ -9,6 +10,7 @@ const ledgerCredentialRoutes = require('./routes/ledgerCredential');
 const checkoutConfigRoutes = require('./routes/checkoutConfig');
 const merchantsRoutes = require('./routes/merchants');
 const checkoutSessionsRoutes = require('./routes/checkoutSessions');
+const merchantLoginRoutes = require('./routes/merchantLogin');
 const checkoutWebhooksRoutes = require('./routes/checkoutWebhooks');
 const hostedPageRoutes = require('./routes/hostedPage');
 
@@ -34,6 +36,18 @@ function createApp() {
   // unauthenticated surface" grouping.
   app.use('/pay', hostedPageRoutes);
 
+  // Merchant dashboard (services/checkout/admin-console) — a merchant
+  // viewing their own checkout sessions/webhook deliveries. A third,
+  // deliberate exception to "only /pay/* and /v1/webhooks/* are public"
+  // on this same domain — unlike those two, this one IS credential-gated
+  // (MerchantSession), so it needs its own SPA-fallback route the same
+  // way identity's and gateway's own consoles already do, since this is
+  // a real client-routed React Router app, not a static doc page.
+  app.use('/merchant', express.static(path.join(__dirname, '../public/merchant')));
+  app.get(/^\/merchant(\/.*)?$/, (req, res) => {
+    res.sendFile(path.join(__dirname, '../public/merchant/index.html'));
+  });
+
   app.use(express.json());
 
   // Each route declares its own required scope (requireApiKey) rather
@@ -46,6 +60,7 @@ function createApp() {
   app.use('/v1/tenants', checkoutConfigRoutes);
   app.use('/v1/tenants', merchantsRoutes);
   app.use('/v1/tenants', checkoutSessionsRoutes);
+  app.use('/v1/tenants', merchantLoginRoutes);
 
   app.use(errorHandler);
 

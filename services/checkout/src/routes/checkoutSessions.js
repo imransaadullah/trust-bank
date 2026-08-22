@@ -1,6 +1,7 @@
 const express = require('express');
 const checkoutSessionService = require('../services/checkoutSessionService');
 const { requireApiKey } = require('../middleware/auth');
+const { resolveMerchantScope } = require('../middleware/merchantAuth');
 
 const router = express.Router();
 const operate = requireApiKey('operate');
@@ -24,6 +25,21 @@ router.post('/:tenantId/checkout-sessions', operate, async (req, res, next) => {
         status: session.status, amountKobo: session.amountKobo, expiresAt: session.expiresAt,
       },
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// A real gap this slice closes — accepts either the tenant's own
+// operate credential (sees every merchant, or one via ?merchantId=) or a
+// merchant's own session (always locked to just their own sessions).
+router.get('/:tenantId/checkout-sessions', resolveMerchantScope(), async (req, res, next) => {
+  try {
+    const { status, limit } = req.query;
+    const sessions = await checkoutSessionService.list({
+      tenantId: req.params.tenantId, merchantId: req.scopedMerchantId, status, limit,
+    });
+    res.json({ success: true, data: sessions });
   } catch (err) {
     next(err);
   }

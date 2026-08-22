@@ -46,4 +46,16 @@ async function requireExists({ tenantId, merchantId }) {
   return merchant;
 }
 
-module.exports = { create, get, list, requireExists };
+/** Mints a brand-new secret, replacing the old one outright — same
+ * "re-readable indefinitely" convention as get() above, not a shown-once
+ * credential, so there's no separate reveal step beyond the response
+ * here and a subsequent GET. */
+async function rotateWebhookSecret({ tenantId, merchantId }) {
+  await requireExists({ tenantId, merchantId });
+  const webhookSecret = crypto.randomBytes(32).toString('hex');
+  const encryptedWebhookSecret = encryptJSON({ secret: webhookSecret });
+  const merchant = await prisma.merchant.update({ where: { id: merchantId }, data: { encryptedWebhookSecret } });
+  return { ...merchant, webhookSecret };
+}
+
+module.exports = { create, get, list, requireExists, rotateWebhookSecret };

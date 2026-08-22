@@ -76,4 +76,15 @@ async function drainOnce() {
   return rows.length;
 }
 
-module.exports = { drainOnce, claimBatch, deliverOne };
+/** A real gap this slice closes — no route anywhere listed delivery
+ * attempts before now, so a merchant (or the tenant, debugging on their
+ * behalf) had no way to see delivery/retry history for a session. */
+async function list({ tenantId, merchantId, status, limit }) {
+  return prisma.merchantWebhookDelivery.findMany({
+    where: { tenantId, merchantId, ...(status ? { status } : {}) },
+    orderBy: { createdAt: 'desc' },
+    take: Math.min(limit ? Number(limit) : 50, 200),
+  });
+}
+
+module.exports = { drainOnce, claimBatch, deliverOne, list };

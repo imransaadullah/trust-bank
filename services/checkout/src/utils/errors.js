@@ -65,6 +65,26 @@ class CheckoutSessionNotCancellableError extends CheckoutError {
   }
 }
 
+// Thrown by requireMerchantAuth (via merchantSessionService.verify) when a
+// mch_live_ token fails verification — mirrors Identity's own
+// SessionInvalidError and Gateway's own GatewaySessionInvalidError.
+class MerchantSessionInvalidError extends CheckoutError {
+  constructor() {
+    super('Invalid or expired session', 'SESSION_INVALID', 401);
+  }
+}
+
+// Thrown when an OTP verifies successfully against the auth provider but
+// doesn't resolve to a real, active Merchant for this tenant — a verified
+// email with no matching merchant account isn't authorized for a
+// dashboard, distinct from a wrong/expired code (which the provider
+// itself rejects before this is ever reached).
+class MerchantAuthInvalidError extends CheckoutError {
+  constructor() {
+    super('No active merchant account found for this email', 'MERCHANT_AUTH_INVALID', 403);
+  }
+}
+
 module.exports = {
   CheckoutError,
   ProviderNotImplementedError,
@@ -76,4 +96,6 @@ module.exports = {
   MerchantNotFoundError,
   CheckoutSessionNotFoundError,
   CheckoutSessionNotCancellableError,
+  MerchantSessionInvalidError,
+  MerchantAuthInvalidError,
 };

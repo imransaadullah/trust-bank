@@ -28,4 +28,10 @@ services/cards/node_modules/
 services/cards/.env
 services/checkout/node_modules/
 services/checkout/.env
+# Build artifact of checkout/admin-console/ — services/checkout/public/
+# has no hand-written page of its own (unlike gateway's own public/),
+# so the whole directory is ignored, same as services/identity/public/.
+services/checkout/public/
+services/checkout/admin-console/node_modules/
+services/checkout/admin-console/tsconfig.tsbuildinfo
 *.log
