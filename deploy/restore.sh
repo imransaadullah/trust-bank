@@ -7,7 +7,8 @@
 # the live one — pass --target-db explicitly for a real recovery.
 #
 # Usage: ./restore.sh <db-name> [backup-name|latest] [--target-db <name>]
-#   db-name: trust_bank_ledger | trustbank_payments | trustbank_compliance | trustpay_backend
+#   db-name: trust_bank_ledger | trustbank_payments | trustbank_compliance | trustbank_gateway |
+#            trustbank_identity | trustbank_cards | trustbank_checkout | trustpay_backend
 set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/common.sh
@@ -36,8 +37,11 @@ require_cmd pg_restore "should ship with the postgresql-client package"
 [ $# -ge 1 ] || die "Usage: $0 <db-name> [backup-name|latest] [--target-db <name>]"
 DB_NAME="$1"; shift
 case "$DB_NAME" in
-  trust_bank_ledger|trustbank_payments|trustbank_compliance|trustpay_backend) ;;
-  *) die "unknown db-name: $DB_NAME (expected trust_bank_ledger, trustbank_payments, trustbank_compliance, or trustpay_backend)" ;;
+  trust_bank_ledger|trustbank_payments|trustbank_compliance|trustbank_gateway|trustbank_identity|trustbank_cards|trustbank_checkout|trustpay_backend) ;;
+  # Gateway/Identity/Cards/Checkout were missing here (and from backup.sh's
+  # own DATABASES array) despite being shipped — the same gap, in both
+  # halves of the same pair. See backup.sh's own comment on its fix.
+  *) die "unknown db-name: $DB_NAME (expected one of: trust_bank_ledger, trustbank_payments, trustbank_compliance, trustbank_gateway, trustbank_identity, trustbank_cards, trustbank_checkout, trustpay_backend)" ;;
 esac
 
 BACKUP_NAME="latest"

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dumps all four trust-bank databases + Postgres role definitions, uploads
+# Dumps all eight trust-bank databases + Postgres role definitions, uploads
 # each to S3-compatible storage, and prunes backups older than
 # BACKUP_RETENTION_DAYS. Meant to run daily via trustbank-backup.timer
 # (deploy/templates/trustbank-backup.timer.tmpl).
@@ -40,7 +40,12 @@ require_cmd gzip "should already be present"
 PGPASSWORD="$(cat "$PG_SUPERUSER_PW_FILE")"
 export PGPASSWORD
 
-DATABASES=(trust_bank_ledger trustbank_payments trustbank_compliance trustpay_backend)
+# Gateway/Identity/Cards/Checkout were missing here despite being shipped
+# and backed up nowhere else — the same "shipped but never actually wired
+# into main()" gap install.sh's own comment already documents fixing for
+# its build loop; this is the backup-side equivalent, caught while
+# building deploy/uninstall.sh (which needed the real database list too).
+DATABASES=(trust_bank_ledger trustbank_payments trustbank_compliance trustbank_gateway trustbank_identity trustbank_cards trustbank_checkout trustpay_backend)
 TIMESTAMP="$(date -u +%Y%m%dT%H%M%SZ)"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT

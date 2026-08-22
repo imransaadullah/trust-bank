@@ -9,7 +9,8 @@ the terminal). `install.sh` and `provision-tenant.sh` replace that.
 ## What's here
 
 ```
-install.sh              # fresh Ubuntu box -> all four services built, migrated, running
+install.sh              # fresh Ubuntu box -> all eight services built, migrated, running
+uninstall.sh             # reverses install.sh — stop/remove services, drop DBs, delete the clone
 provision-tenant.sh     # onboard a tenant onto an already-installed box
 backup.sh                # dump all 4 DBs, upload to S3-compatible storage, prune by retention
 restore.sh               # download a backup and restore it — real DR, and rehearsing one
@@ -48,6 +49,31 @@ A second bank tenant on the same box, once it has its own product backend deploy
 ./provision-tenant.sh --slug some-bank --name "Some Bank" --license-type NATIONAL_MFB \
   --product-backend-env /home/ubuntu/trust-bank/services/some-bank-backend/.env
 ```
+
+## Starting over
+
+`uninstall.sh` reverses `install.sh` on the same box: stops and removes every trust-bank systemd
+unit, drops every trust-bank database (and the `ledger_app` role), and deletes the cloned repo
+plus `$SECRETS_DIR` (`~/.trustbank`). System packages (Postgres, Caddy, Go, Node/nvm, awscli) are
+left in place by default — pass `--purge-packages` to also apt-remove those.
+
+```bash
+./uninstall.sh                    # interactive confirmation, full app-level teardown
+./uninstall.sh --yes --purge-packages   # scripted, also removes the OS packages install.sh added
+```
+
+`--keep-databases`, `--keep-repo`, and `--keep-secrets` let you skip any one of the three
+destructive pieces individually — useful if, say, you want the services stopped and the repo
+removed but you're about to restore the databases from a backup and don't want them dropped first.
+
+For real disaster recovery (not a test reset), a fresh box plus `install.sh` already generates new
+databases from nothing — you don't need `uninstall.sh` for that path; see "Real disaster recovery"
+below instead. `uninstall.sh` is for when you want the box back to a known-clean state on purpose,
+same reasoning a Lightsail/EC2 instance being cheap and disposable already gives you as an
+alternative — delete-and-recreate the instance is simpler and more certain than any uninstaller can
+be, since nothing tracks every side effect `install.sh` had across `apt`/systemd/Postgres to
+guarantee a truly clean reverse. Reach for this script when recreating the instance isn't an option
+(a fixed IP you don't want to lose, a shared box you don't control), not as the default choice.
 
 ## What each script actually does
 
@@ -112,7 +138,7 @@ justify the operational burden, same reasoning already applied to mTLS, a live s
 and Merchant Checkout. What's built instead:
 
 - **`backup.sh`**, run daily by `trustbank-backup.timer` (installed and enabled by `install.sh`,
-  inert until `deploy/backup.env` has real credentials): `pg_dump`s all four databases (custom
+  inert until `deploy/backup.env` has real credentials): `pg_dump`s all eight databases (custom
   format) plus a `pg_dumpall --globals-only` for role definitions, uploads each to any
   S3-compatible endpoint (AWS S3, Backblaze B2, DigitalOcean Spaces, Cloudflare R2, MinIO — all
   speak the same API via `--endpoint-url`), and prunes anything older than
@@ -122,11 +148,13 @@ and Merchant Checkout. What's built instead:
   running this to *rehearse* a restore can't accidentally clobber production — pass `--target-db`
   explicitly for a real recovery. §8's own words are the reason this script exists at all: "we
   have backups is not a DR plan until you've timed a restore."
-- **`notify-failure.sh`**, wired via `OnFailure=trustbank-notify-failure@%n.service` on all four
+- **`notify-failure.sh`**, wired via `OnFailure=trustbank-notify-failure@%n.service` on all eight
   service units — posts a plain JSON webhook (Slack, Discord, most incident tools accept this
   with no vendor-specific code) when systemd gives up restarting a crashed service (past
-  `Restart=always`'s default burst limit — not on every transient blip). Covers all four
-  services, including the three that are loopback-only and unreachable from outside.
+  `Restart=always`'s default burst limit — not on every transient blip). Covers all eight
+  services, including the four (Ledger, Payments, Compliance, Cards) that are loopback-only and
+  unreachable from outside — see `NETWORK_TOPOLOGY.md` for which of the other four (TrustPay
+  Backend, Gateway, Identity, Checkout) expose how much of their own surface publicly.
 - **External uptime check — documented, not built.** `OnFailure=` only sees a process crash; a
   healthy `trustpay-backend` behind a dead reverse proxy still looks "fine" to systemd. Point any
   third-party uptime monitor's free tier (UptimeRobot, healthchecks.io) at
@@ -163,7 +191,7 @@ during this feature's own live verification. Do this after every real config cha
 
 `OnFailure=` only fires once systemd gives up retrying a genuinely crash-looping service —
 useful for correctness, useless for finding out your webhook URL is wrong before you actually
-need it. Trigger a real test notification safely, without touching any of the four services:
+need it. Trigger a real test notification safely, without touching any of the eight services:
 
 ```bash
 sudo systemctl start trustbank-notify-failure@manual-test.service
@@ -177,28 +205,40 @@ incident.
 ### Real disaster recovery — the full sequence, and what it doesn't cover
 
 1. Provision a new box, run `install.sh` — this builds fresh empty databases and, deliberately,
-   **generates new secrets** (`TRUSTPAY_JWT_SECRET`, `PAYMENTS_ENCRYPTION_KEY`, the Ledger's
+   **generates new secrets** (`TRUSTPAY_JWT_SECRET`, `PAYMENTS_ENCRYPTION_KEY`, `GATEWAY_ENCRYPTION_KEY`,
+   `IDENTITY_ENCRYPTION_KEY`, `CARDS_ENCRYPTION_KEY`, `CHECKOUT_ENCRYPTION_KEY`, the Ledger's
    `ledger_app` password). Read the warning below before going further.
-2. `sudo systemctl stop trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend`
-   — stop all four before restoring, so nothing writes to a half-restored database.
+2. `sudo systemctl stop trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustbank-cards trustbank-checkout trustpay-backend`
+   — stop all eight before restoring, so nothing writes to a half-restored database.
 3. Restore each database with its real name, not the rehearsal default:
    ```bash
    ./restore.sh trust_bank_ledger latest --target-db trust_bank_ledger
    ./restore.sh trustbank_payments latest --target-db trustbank_payments
    ./restore.sh trustbank_compliance latest --target-db trustbank_compliance
+   ./restore.sh trustbank_gateway latest --target-db trustbank_gateway
+   ./restore.sh trustbank_identity latest --target-db trustbank_identity
+   ./restore.sh trustbank_cards latest --target-db trustbank_cards
+   ./restore.sh trustbank_checkout latest --target-db trustbank_checkout
    ./restore.sh trustpay_backend latest --target-db trustpay_backend
    ```
    (`pg_restore --clean --if-exists`, already in `restore.sh`, is safe against the fresh empty
    databases `install.sh` just created — there's nothing to drop, so it just creates everything.)
-4. `sudo systemctl start trustbank-ledger trustbank-payments trustbank-compliance trustpay-backend`
+4. `sudo systemctl start trustbank-ledger trustbank-payments trustbank-compliance trustbank-gateway trustbank-identity trustbank-cards trustbank-checkout trustpay-backend`
 
-**A secret `backup.sh` deliberately never captures:** `PAYMENTS_ENCRYPTION_KEY` lives only in
-`services/payments/.env`, never in the database — but Payments' `TenantProviderConfig
-.encryptedCredentials` (a tenant's Paystack/self-issued-NUBAN secret key) was encrypted *with* it.
-`install.sh` generating a *new* key on a new box means the restored, encrypted rows become
-permanently undecryptable — not corrupted, just unreadable with the new key. It's deliberately
-kept out of the S3-uploaded database dumps — a key living right next to the ciphertext it
-protects, in the same backup's blast radius, defeats the point of it being separate.
+**Secrets `backup.sh` deliberately never captures:** `PAYMENTS_ENCRYPTION_KEY`, `GATEWAY_ENCRYPTION_KEY`,
+`IDENTITY_ENCRYPTION_KEY`, and `CHECKOUT_ENCRYPTION_KEY` each live only in their own service's
+`.env`, never in the database — but each encrypts real data at rest with it: Payments'
+`TenantProviderConfig.encryptedCredentials` (a tenant's Paystack/self-issued-NUBAN secret key),
+Gateway's `TenantBackendCredential.encryptedToken` (every tenant's Ledger/Payments/Compliance/
+Cards/Checkout credential), Identity's `StaffUser.mfaSecret`, and Checkout's
+`TenantLedgerCredential`/`TenantCheckoutProviderConfig`/every merchant's own webhook signing
+secret. `CARDS_ENCRYPTION_KEY` is the same shape (`TenantLedgerCredential`/
+`TenantCardProviderConfig`) though a fresh Cards deployment has less already-encrypted data at risk
+day one. `install.sh` generating a *new* key on a new box means the restored, encrypted rows for
+whichever key is missing become permanently undecryptable — not corrupted, just unreadable with
+the new key. All five are deliberately kept out of the S3-uploaded database dumps — a key living
+right next to the ciphertext it protects, in the same backup's blast radius, defeats the point of
+it being separate.
 
 Instead, `install.sh` captures it (and `TRUSTPAY_JWT_SECRET`, lower stakes — a new one only
 forces re-login, no data is lost) into `$SECRETS_DIR/critical-secrets.env`
