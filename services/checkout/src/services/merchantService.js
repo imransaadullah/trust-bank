@@ -58,4 +58,15 @@ async function rotateWebhookSecret({ tenantId, merchantId }) {
   return { ...merchant, webhookSecret };
 }
 
-module.exports = { create, get, list, requireExists, rotateWebhookSecret };
+/** The real gap named at the end of the merchant-dashboard slice — no
+ * route anywhere let this change after creation. Either the merchant
+ * themselves or the tenant (see resolveMerchantScope on the route) can
+ * call this; same no-validation-beyond-non-empty simplicity create()
+ * already uses for this field. */
+async function updateWebhookUrl({ tenantId, merchantId, webhookUrl }) {
+  await requireExists({ tenantId, merchantId });
+  const merchant = await prisma.merchant.update({ where: { id: merchantId }, data: { webhookUrl } });
+  return { ...merchant, webhookSecret: decryptJSON(merchant.encryptedWebhookSecret).secret };
+}
+
+module.exports = { create, get, list, requireExists, rotateWebhookSecret, updateWebhookUrl };

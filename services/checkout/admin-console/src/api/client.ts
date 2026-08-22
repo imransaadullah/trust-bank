@@ -59,7 +59,7 @@ export function setUnauthorizedHandler(handler: () => void): void {
 }
 
 interface RequestOptions {
-  method?: 'GET' | 'POST';
+  method?: 'GET' | 'POST' | 'PATCH';
   body?: unknown;
   query?: Record<string, string | undefined>;
   /** Only the login flow's own tenant id, before any session exists yet. */

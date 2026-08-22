@@ -63,6 +63,30 @@ router.get('/:tenantId/merchants', operate, async (req, res, next) => {
   }
 });
 
+// The named gap from the merchant-dashboard slice, closed: either the
+// merchant themselves or the tenant (same dual-auth as every other
+// route here) can update their own webhookUrl after creation.
+router.patch('/:tenantId/merchants/:merchantId', resolveMerchantScope(), async (req, res, next) => {
+  try {
+    if (forbidCrossMerchant(req, res)) return;
+    const { webhookUrl } = req.body;
+    if (!webhookUrl) {
+      return res.status(400).json({ success: false, error: 'webhookUrl is required' });
+    }
+    const merchant = await merchantService.updateWebhookUrl({ tenantId: req.params.tenantId, merchantId: req.params.merchantId, webhookUrl });
+    res.json({
+      success: true,
+      data: {
+        id: merchant.id, tenantId: merchant.tenantId, name: merchant.name, email: merchant.email,
+        webhookUrl: merchant.webhookUrl, webhookSecret: merchant.webhookSecret, status: merchant.status,
+        createdAt: merchant.createdAt, updatedAt: merchant.updatedAt,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Mints a brand-new secret — re-readable indefinitely afterward via the
 // GET above, same convention as the secret already has, not a shown-once
 // credential (see merchantService.rotateWebhookSecret's own comment).

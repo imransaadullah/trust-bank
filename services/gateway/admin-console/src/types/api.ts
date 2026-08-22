@@ -58,6 +58,19 @@ export interface SandboxMapping {
   sandboxTenantId: string;
 }
 
+export interface Merchant {
+  id: string;
+  tenantId: string;
+  name: string;
+  email: string;
+  webhookUrl: string | null;
+  /** Re-readable indefinitely — see services/checkout's own merchantService.js comment. Not a shown-once secret. */
+  webhookSecret: string;
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type PolicyType = 'kyc' | 'device' | 'loan-eligibility' | 'card-issuance' | 'monitoring';
 
 /** A versioned policy row — shape varies by type, always carries version/effectiveFrom. */

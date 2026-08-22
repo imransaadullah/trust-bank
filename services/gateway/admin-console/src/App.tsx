@@ -7,6 +7,7 @@ import { ApiKeysPage } from './routes/ApiKeysPage';
 import { UsagePage } from './routes/UsagePage';
 import { SandboxPage } from './routes/SandboxPage';
 import { CompliancePoliciesPage } from './routes/CompliancePoliciesPage';
+import { MerchantsPage } from './routes/MerchantsPage';
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="usage" element={<UsagePage />} />
         <Route path="sandbox" element={<SandboxPage />} />
         <Route path="compliance-policies" element={<CompliancePoliciesPage />} />
+        <Route path="merchants" element={<MerchantsPage />} />
       </Route>
     </Routes>
   );

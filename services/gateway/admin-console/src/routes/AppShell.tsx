@@ -7,6 +7,7 @@ const NAV_LINKS = [
   { to: '/usage', label: 'Usage' },
   { to: '/sandbox', label: 'Sandbox' },
   { to: '/compliance-policies', label: 'Compliance policies' },
+  { to: '/merchants', label: 'Merchants' },
 ];
 
 export function AppShell() {
